@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Noodle physics — 5×5×5 lattice</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ── Paperclip tokens (subset) — manila swapped to #E5E5E5 per spec ── */
+  :root {
+    --bond:      #FFFFFF;
+    --linen:     #F5F3F0;
+    --parchment: #F0ECE7;
+    --manila:    #E5E5E5;   /* was #F3E6C4 */
+    --vellum:    #E0DCD6;
+    --aluminum:  #A8AEB2;
+    --graphite:  #52585D;
+    --charcoal:  #141413;
+    --ink:       #0A0A0A;
+    --signal:    #22C55E;
+    --blue:      #2563EB;
+
+    /* agent palette — capsules only */
+    --agent-2a: #C9A9E8;       --agent-2b: #EE79A1;  /* lavender → hot pink */
+    --agent-4a: var(--manila); --agent-4b: #E3A21A;  /* (manila→#E5E5E5) → amber */
+    --agent-5a: #1F4DD6;       --agent-5b: #3AA35C;  /* cobalt → green */
+    --agent-7a: #7FD1C4;       --agent-7b: #2B3A8F;  /* seafoam → indigo */
+    --agent-9a: #F3B49E;       --agent-9b: #1F4ED4;  /* peach → cobalt */
+
+    --font-display: 'Inter Tight', 'Inter', system-ui, sans-serif;
+    --font-body:    'Inter', system-ui, sans-serif;
+    --font-mono:    'JetBrains Mono', ui-monospace, monospace;
+
+    --r-xs: 4px; --r-md: 16px; --r-pill: 9999px;
+    --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --dur-short: 200ms; --dur-medium: 400ms;
+
+    /* ── semantic tokens — light defaults (these flip in dark) ── */
+    --bg:         var(--bond);
+    --bg-alt:     var(--linen);
+    --surface:    var(--parchment);
+    --rule:       var(--vellum);
+    --text:       var(--ink);
+    --text-2:     var(--graphite);
+    --text-muted: var(--aluminum);
+  }
+
+  [data-theme="dark"] {
+    --bg:         var(--charcoal);
+    --bg-alt:     #141413;
+    --surface:    #1F1D1A;
+    --rule:       #2F2C28;
+    --text:       var(--manila);
+    --text-2:     #9A958A;
+    --text-muted: #6E6960;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-feature-settings: 'ss01', 'cv11';
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: background-color var(--dur-medium) var(--ease-out),
+                color var(--dur-medium) var(--ease-out);
+  }
+
+  header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 22px 32px 14px;
+    border-bottom: 1px solid var(--rule);
+    transition: border-color var(--dur-medium) var(--ease-out);
+  }
+  .eyebrow {
+    font-size: 11px; font-weight: 500;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--text-muted); margin-bottom: 6px;
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-size: 26px; font-weight: 600;
+    letter-spacing: -0.02em; line-height: 1.1;
+  }
+  .lede {
+    font-size: 14px; line-height: 1.5;
+    color: var(--text-2); margin-top: 4px; max-width: 56ch;
+  }
+  .header-right {
+    display: flex; flex-direction: column;
+    align-items: flex-end; gap: 10px; padding-bottom: 4px;
+  }
+  .switches { display: flex; align-items: center; gap: 20px; }
+  .telemetry {
+    display: flex; align-items: center; gap: 8px;
+    font-family: var(--font-mono); font-size: 11px;
+    color: var(--text-2); font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .hb {
+    width: 16px; height: 8px;
+    border-radius: var(--r-xs);
+    background: var(--blue);
+    animation: hb-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes hb-pulse {
+    0%, 100% { transform: scale(0.85); opacity: 0.7; }
+    50%      { transform: scale(1);    opacity: 1; }
+  }
+
+  /* ── pill switches ── */
+  .sw {
+    display: flex; align-items: center; gap: 8px;
+    background: none; border: none; cursor: pointer;
+    font-family: var(--font-body); padding: 0;
+  }
+  .sw-label {
+    font-size: 11px; font-weight: 500;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--text-muted); text-align: right;
+  }
+  .sw-track {
+    width: 40px; height: 22px;
+    border-radius: var(--r-pill);
+    background: var(--rule);
+    position: relative;
+    transition: background var(--dur-short) var(--ease-out);
+  }
+  .sw-thumb {
+    position: absolute; top: 3px; left: 3px;
+    width: 16px; height: 16px;
+    border-radius: var(--r-pill);
+    background: var(--text);
+    transition: transform var(--dur-short) var(--ease-out),
+                background var(--dur-short) var(--ease-out);
+  }
+  .sw[aria-checked="true"] .sw-track { background: var(--signal); }
+  .sw[aria-checked="true"] .sw-thumb { transform: translateX(18px); background: var(--charcoal); }
+  .sw:focus-visible .sw-track {
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--signal);
+  }
+
+  #stage-wrap {
+    flex: 1; min-height: 0;
+    background: var(--bg-alt);
+    transition: background-color var(--dur-medium) var(--ease-out);
+  }
+  svg#stage { width: 100%; height: 100%; display: block; touch-action: none; }
+  .shape { cursor: grab; }
+  .shape:active { cursor: grabbing; }
+
+  /* theme-aware SVG paint — via class so custom props cascade on theme swap */
+  .card-shape { fill: var(--surface); stroke: var(--rule); stroke-width: 1; }
+  .card-label { fill: var(--text-muted); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; }
+  .disc       { fill: var(--surface); stroke: var(--text-2); stroke-width: 2; }
+  .lattice    { fill: var(--text-muted); }
+  .n-ink { stroke: var(--text); }
+  .n-2   { stroke: var(--text-2); }
+  .n-3   { stroke: var(--text-muted); }
+  .card-shape, .disc, .lattice, .n-ink, .n-2, .n-3 {
+    transition: fill var(--dur-medium) var(--ease-out),
+                stroke var(--dur-medium) var(--ease-out);
+  }
+  #latticeLayer { opacity: 0; transition: opacity var(--dur-medium) var(--ease-out); }
+  #latticeLayer.on { opacity: 1; }
+
+  /* ── control panel ── */
+  #panel {
+    display: flex; gap: 30px; align-items: center; flex-wrap: wrap;
+    padding: 14px 32px 18px;
+    border-top: 1px solid var(--rule);
+    background: var(--bg);
+    transition: background-color var(--dur-medium) var(--ease-out),
+                border-color var(--dur-medium) var(--ease-out);
+  }
+  .knob { display: flex; align-items: center; gap: 10px; }
+  .knob label {
+    font-size: 11px; font-weight: 500;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--text-2); white-space: nowrap;
+  }
+  .knob output {
+    font-family: var(--font-mono); font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-2); min-width: 42px;
+  }
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    width: 112px; height: 1px;
+    background: var(--aluminum); outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px;
+    border-radius: var(--r-pill);
+    background: var(--text); cursor: pointer;
+    transition: transform var(--dur-short) var(--ease-out);
+  }
+  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+  input[type="range"]:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--signal);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 14px; height: 14px;
+    border-radius: var(--r-pill);
+    background: var(--text); border: none; cursor: pointer;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 100ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="eyebrow">Motion study · verlet rope · 5×5×5 lattice</div>
+    <h1>Noodle physics.</h1>
+    <p class="lede">Ten nodes live on a 5×5×5 grid. Each drifts one cell along a random axis, then returns home. Depth is faked with scale — the shapes stay flat.</p>
+  </div>
+  <div class="header-right">
+    <div class="switches">
+      <button id="gridToggle" class="sw" role="switch" aria-checked="false" aria-label="Toggle lattice guides">
+        <span class="sw-label">Lattice</span>
+        <span class="sw-track"><span class="sw-thumb"></span></span>
+      </button>
+      <button id="themeToggle" class="sw" role="switch" aria-checked="false" aria-label="Toggle dark mode">
+        <span class="sw-label" id="ttLabel">Dark</span>
+        <span class="sw-track"><span class="sw-thumb"></span></span>
+      </button>
+    </div>
+    <div class="telemetry">
+      <span class="hb" aria-hidden="true"></span>
+      <span id="stat">simulation running · 10 nodes · 13 ropes</span>
+    </div>
+  </div>
+</header>
+
+<div id="stage-wrap">
+  <svg id="stage" viewBox="0 0 900 640" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <linearGradient id="grad-agent2" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="var(--agent-2a)"/><stop offset="1" stop-color="var(--agent-2b)"/>
+      </linearGradient>
+      <linearGradient id="grad-agent4" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="var(--agent-4a)"/><stop offset="1" stop-color="var(--agent-4b)"/>
+      </linearGradient>
+      <linearGradient id="grad-agent5" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="var(--agent-5a)"/><stop offset="1" stop-color="var(--agent-5b)"/>
+      </linearGradient>
+      <linearGradient id="grad-agent7" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="var(--agent-7a)"/><stop offset="1" stop-color="var(--agent-7b)"/>
+      </linearGradient>
+      <linearGradient id="grad-agent9" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="var(--agent-9a)"/><stop offset="1" stop-color="var(--agent-9b)"/>
+      </linearGradient>
+    </defs>
+    <g id="latticeLayer"></g>
+    <g id="noodleLayer"></g>
+    <g id="shapeLayer"></g>
+  </svg>
+</div>
+
+<div id="panel">
+  <div class="knob">
+    <label for="slack">Slack</label>
+    <input type="range" id="slack" min="1.05" max="2.2" step="0.01" value="1.35">
+    <output id="slackOut">1.35</output>
+  </div>
+  <div class="knob">
+    <label for="gravity">Gravity</label>
+    <input type="range" id="gravity" min="0" max="1.2" step="0.01" value="0.42">
+    <output id="gravityOut">0.42</output>
+  </div>
+  <div class="knob">
+    <label for="damping">Damping</label>
+    <input type="range" id="damping" min="0.85" max="0.995" step="0.001" value="0.965">
+    <output id="dampingOut">0.965</output>
+  </div>
+  <div class="knob">
+    <label for="thickness">Connector</label>
+    <input type="range" id="thickness" min="1" max="16" step="0.5" value="7">
+    <output id="thicknessOut">7px</output>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script>
+/* ============================================================
+   0. THE LATTICE — 5×5×5 grid + projection
+   Grid coords run 0–4 on each axis. project() turns a 3D cell
+   into a 2D screen point plus a scale factor `k`. Everything
+   downstream (shapes, anchors, ropes) only ever sees 2D.
+   ============================================================ */
+
+const SVGNS = "http://www.w3.org/2000/svg";
+const stage        = document.getElementById("stage");
+const shapeLayer   = document.getElementById("shapeLayer");
+const noodleLayer  = document.getElementById("noodleLayer");
+const latticeLayer = document.getElementById("latticeLayer");
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const GRID   = 5;      // cells per axis
+const CELL_X = 116;    // horizontal spacing at k = 1
+const CELL_Y = 92;     // vertical spacing at k = 1
+const Z_STEP = 150;    // world depth per cell
+const FOCAL  = 1500;   // bigger = flatter perspective
+const CX = 450, CY = 318;
+
+function project(gx, gy, gz) {
+  const cx = gx - (GRID - 1) / 2;
+  const cy = gy - (GRID - 1) / 2;
+  const cz = gz - (GRID - 1) / 2;
+  const k = FOCAL / (FOCAL + cz * Z_STEP);   // near cells scale up, far scale down
+  return { x: CX + cx * CELL_X * k, y: CY + cy * CELL_Y * k, k };
+}
+
+// static dot lattice — built once, never re-rendered (the grid itself never moves)
+for (let gz = GRID - 1; gz >= 0; gz--) {
+  for (let gy = 0; gy < GRID; gy++) {
+    for (let gx = 0; gx < GRID; gx++) {
+      const p = project(gx, gy, gz);
+      const d = document.createElementNS(SVGNS, "circle");
+      d.setAttribute("cx", p.x.toFixed(1));
+      d.setAttribute("cy", p.y.toFixed(1));
+      d.setAttribute("r", (1.5 * p.k).toFixed(2));
+      d.setAttribute("opacity", (0.16 + 0.30 * (gz / (GRID - 1))).toFixed(2));
+      d.classList.add("lattice");
+      latticeLayer.appendChild(d);
+    }
+  }
+}
+
+/* ============================================================
+   1. THE SHAPES
+   capsule (1:2+ pill) = agent → agent-palette gradient
+   square card (16px radius) = project → surface + hairline
+   disc = neutral peer node
+   Each one owns a home cell and animates gx/gy/gz as floats.
+   ============================================================ */
+
+const SHAPES = [
+  // capsules are always portrait (h > w) so the gradient runs along the long axis
+  { id:"A", kind:"capsule", w:56, h:144, cell:[1,1,1], fill:"url(#grad-agent5)" },
+  { id:"B", kind:"card",    w:96, h:96,  cell:[3,0,2], label:"PROJECT A" },
+  { id:"C", kind:"capsule", w:56, h:130, cell:[3,2,1], fill:"url(#grad-agent9)" },
+  { id:"D", kind:"card",    w:96, h:96,  cell:[1,3,2], label:"PROJECT B" },
+  { id:"E", kind:"capsule", w:52, h:150, cell:[3,4,3], fill:"url(#grad-agent2)" },
+  { id:"F", kind:"capsule", w:48, h:116, cell:[0,2,3], fill:"url(#grad-agent4)" },
+  { id:"G", kind:"disc",    r:44,        cell:[2,1,3] },
+  { id:"H", kind:"disc",    r:30,        cell:[1,4,1] },
+  { id:"I", kind:"card",    w:84, h:84,  cell:[4,1,0], label:"PROJECT C" },
+  { id:"J", kind:"capsule", w:46, h:104, cell:[2,3,0], fill:"url(#grad-agent7)" },
+];
+
+SHAPES.forEach(s => {
+  // grid position — these are the animated values
+  [s.gx, s.gy, s.gz] = s.cell;
+  s.home = { gx: s.cell[0], gy: s.cell[1], gz: s.cell[2] };
+  // projected screen state, refreshed every frame
+  s.sx = 0; s.sy = 0; s.k = 1;
+  s.dragDX = 0; s.dragDY = 0;   // screen-space offset while dragging
+
+  const g = document.createElementNS(SVGNS, "g");
+  g.classList.add("shape");
+  g.dataset.id = s.id;
+
+  if (s.kind === "disc") {
+    const c = document.createElementNS(SVGNS, "circle");
+    c.setAttribute("r", s.r); c.setAttribute("cx", 0); c.setAttribute("cy", 0);
+    c.classList.add("disc");
+    g.appendChild(c);
+  } else {
+    const r = document.createElementNS(SVGNS, "rect");
+    r.setAttribute("x", -s.w/2); r.setAttribute("y", -s.h/2);
+    r.setAttribute("width", s.w); r.setAttribute("height", s.h);
+    if (s.kind === "capsule") {
+      r.setAttribute("rx", Math.min(s.w, s.h) / 2);
+      r.setAttribute("fill", s.fill);
+    } else {
+      r.setAttribute("rx", 16);
+      r.classList.add("card-shape");
+    }
+    g.appendChild(r);
+
+    if (s.label) {
+      const t = document.createElementNS(SVGNS, "text");
+      t.textContent = s.label;
+      t.setAttribute("x", -s.w/2 + 12);
+      t.setAttribute("y", -s.h/2 + 20);
+      t.classList.add("card-label");
+      g.appendChild(t);
+    }
+  }
+
+  shapeLayer.appendChild(g);
+  s.el = g;
+});
+
+const shapeById = Object.fromEntries(SHAPES.map(s => [s.id, s]));
+
+/* ── the track: pick an axis, slide one cell, hold, come home ── */
+const AXES = ["gx", "gy", "gz"];
+
+function scheduleMove(s) {
+  const axis = AXES[Math.floor(Math.random() * 3)];
+  const home = s.home[axis];
+  let dir = Math.random() < 0.5 ? -1 : 1;
+  if (home + dir < 0 || home + dir > GRID - 1) dir = -dir;   // stay inside the box
+
+  const out  = gsap.utils.random(2.4, 3.6);
+  const back = gsap.utils.random(2.4, 3.6);
+
+  gsap.timeline({
+    onComplete: () => gsap.delayedCall(gsap.utils.random(0.8, 2.6), () => scheduleMove(s))
+  })
+  .to(s, { [axis]: home + dir, duration: out,  ease: "sine.inOut" })
+  .to(s, { [axis]: home,       duration: back, ease: "sine.inOut" }, `+=${gsap.utils.random(0.5, 1.6)}`);
+}
+
+if (!reducedMotion) {
+  SHAPES.forEach(s => gsap.delayedCall(gsap.utils.random(0, 3.5), () => scheduleMove(s)));
+}
+
+// anchor offsets are authored in flat local coords, then scaled by depth
+function anchorWorld(s, lx, ly) {
+  return { x: s.sx + lx * s.k, y: s.sy + ly * s.k };
+}
+
+/* ============================================================
+   2. THE NOODLES — verlet rope simulation
+   A balanced mesh: every node carries 2–3 connections, so no
+   single shape reads as the hub.
+   ============================================================ */
+
+const SETTINGS = { slack: 1.35, gravity: 0.42, damping: 0.965, iterations: 4, thickness: 7 };
+
+const NOODLES = [
+  { a:"A", al:[ 28, -24], b:"B", bl:[-48,  10], cls:"n-ink", width: 8, segs:18 },
+  { a:"A", al:[ 28,  34], b:"G", bl:[-38, -22], cls:"n-2",   width: 7, segs:16 },
+  { a:"A", al:[  0,  72], b:"F", bl:[  0, -58], cls:"n-2",   width: 7, segs:18 },
+  { a:"B", al:[ 12,  48], b:"C", bl:[  0, -65], cls:"n-ink", width: 8, segs:16 },
+  { a:"B", al:[ 48,   8], b:"I", bl:[-42, -12], cls:"n-3",   width: 6, segs:16 },
+  { a:"C", al:[  0,  65], b:"E", bl:[  0, -75], cls:"n-ink", width: 8, segs:18 },
+  { a:"C", al:[-28, -14], b:"G", bl:[ 38,  22], cls:"n-2",   width: 7, segs:18 },
+  { a:"D", al:[-48, -18], b:"F", bl:[  0,  58], cls:"n-2",   width: 7, segs:18 },
+  { a:"D", al:[-12,  48], b:"H", bl:[  0, -30], cls:"n-3",   width: 6, segs:16 },
+  { a:"D", al:[ 48,  12], b:"J", bl:[-23, -22], cls:"n-2",   width: 7, segs:16 },
+  { a:"E", al:[-26,  14], b:"J", bl:[ 23,  22], cls:"n-3",   width: 6, segs:20 },
+  { a:"G", al:[ 30, -32], b:"I", bl:[-42,  18], cls:"n-3",   width: 6, segs:20 },
+  { a:"H", al:[ 26, -14], b:"J", bl:[-23,  38], cls:"n-3",   width: 6, segs:16 },
+];
+
+const REF_WIDTH = Math.max(...NOODLES.map(n => n.width));
+
+NOODLES.forEach(n => {
+  n.widthRatio = n.width / REF_WIDTH;   // preserves hierarchy as thickness scales
+
+  const A0 = project(...shapeById[n.a].cell);
+  const B0 = project(...shapeById[n.b].cell);
+  n.baseDist = Math.hypot(B0.x - A0.x, B0.y - A0.y);
+
+  n.pts = [];
+  for (let i = 0; i <= n.segs; i++) {
+    const t = i / n.segs;
+    const x = A0.x + (B0.x - A0.x) * t;
+    const y = A0.y + (B0.y - A0.y) * t;
+    n.pts.push({ x, y, px: x, py: y });
+  }
+
+  const path = document.createElementNS(SVGNS, "path");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  path.classList.add(n.cls);
+  noodleLayer.appendChild(path);
+  n.el = path;
+});
+
+// runs on slider change only — stroke width doesn't vary frame to frame
+function applyThickness() {
+  NOODLES.forEach(n => {
+    const w = Math.max(1, SETTINGS.thickness * n.widthRatio);
+    n.el.setAttribute("stroke-width", w.toFixed(2));
+  });
+}
+applyThickness();
+
+function stepNoodle(n) {
+  const pts = n.pts;
+  const restLen = (n.baseDist * SETTINGS.slack) / n.segs;
+
+  // momentum + gravity for every free bead
+  for (let i = 1; i < pts.length - 1; i++) {
+    const p = pts[i];
+    const vx = (p.x - p.px) * SETTINGS.damping;
+    const vy = (p.y - p.py) * SETTINGS.damping;
+    p.px = p.x;  p.py = p.y;
+    p.x += vx;
+    p.y += vy + SETTINGS.gravity;
+  }
+
+  // pin the ends to the shapes' current projected anchors
+  const A = anchorWorld(shapeById[n.a], ...n.al);
+  const B = anchorWorld(shapeById[n.b], ...n.bl);
+  pts[0].x = A.x;              pts[0].y = A.y;
+  pts[pts.length-1].x = B.x;   pts[pts.length-1].y = B.y;
+
+  // enforce bead spacing
+  for (let k = 0; k < SETTINGS.iterations; k++) {
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p1 = pts[i], p2 = pts[i+1];
+      const dx = p2.x - p1.x, dy = p2.y - p1.y;
+      const d = Math.hypot(dx, dy) || 0.0001;
+      const diff = (d - restLen) / d * 0.5;
+      const mx = dx * diff, my = dy * diff;
+      const p1Pinned = (i === 0);
+      const p2Pinned = (i + 1 === pts.length - 1);
+      if (p1Pinned)      { p2.x -= mx * 2; p2.y -= my * 2; }
+      else if (p2Pinned) { p1.x += mx * 2; p1.y += my * 2; }
+      else               { p1.x += mx; p1.y += my;
+                           p2.x -= mx; p2.y -= my; }
+    }
+  }
+}
+
+/* ============================================================
+   3. RENDER — project → simulate → draw → depth-sort
+   ============================================================ */
+
+function noodlePath(pts) {
+  let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const mx = (pts[i].x + pts[i+1].x) / 2;
+    const my = (pts[i].y + pts[i+1].y) / 2;
+    d += ` Q ${pts[i].x.toFixed(1)} ${pts[i].y.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)}`;
+  }
+  const last = pts[pts.length-1];
+  d += ` L ${last.x.toFixed(1)} ${last.y.toFixed(1)}`;
+  return d;
+}
+
+let lastOrder = "";
+
+gsap.ticker.add(() => {
+  // a) project every shape's grid cell into screen space
+  SHAPES.forEach(s => {
+    const p = project(s.gx, s.gy, s.gz);
+    s.sx = p.x + s.dragDX;
+    s.sy = p.y + s.dragDY;
+    s.k  = p.k;
+  });
+
+  // b) simulate + draw the ropes
+  NOODLES.forEach(n => {
+    stepNoodle(n);
+    n.el.setAttribute("d", noodlePath(n.pts));
+  });
+
+  // c) place the shapes, scaled by depth
+  SHAPES.forEach(s => {
+    s.el.setAttribute("transform",
+      `translate(${s.sx.toFixed(1)}, ${s.sy.toFixed(1)}) scale(${s.k.toFixed(3)})`);
+  });
+
+  // d) painter's algorithm — far shapes first. Only touch the DOM
+  //    when the order actually changes, not every frame.
+  const sorted = [...SHAPES].sort((a, b) => a.gz - b.gz);
+  const key = sorted.map(s => s.id).join("");
+  if (key !== lastOrder) {
+    sorted.forEach(s => shapeLayer.appendChild(s.el));
+    lastOrder = key;
+  }
+});
+
+/* ============================================================
+   4. DRAG — a screen-space nudge on top of the grid position.
+   Let go and the shape eases back onto its track.
+   ============================================================ */
+
+let drag = null;
+
+function svgPoint(evt) {
+  const pt = stage.createSVGPoint();
+  pt.x = evt.clientX;  pt.y = evt.clientY;
+  return pt.matrixTransform(stage.getScreenCTM().inverse());
+}
+
+stage.addEventListener("pointerdown", (e) => {
+  const g = e.target.closest(".shape");
+  if (!g) return;
+  const s = shapeById[g.dataset.id];
+  const p = svgPoint(e);
+  gsap.killTweensOf(s, "dragDX,dragDY");
+  drag = { s, ox: p.x - s.dragDX, oy: p.y - s.dragDY };
+  stage.setPointerCapture(e.pointerId);
+});
+
+stage.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  const p = svgPoint(e);
+  drag.s.dragDX = p.x - drag.ox;
+  drag.s.dragDY = p.y - drag.oy;
+});
+
+function releaseDrag() {
+  if (!drag) return;
+  gsap.to(drag.s, { dragDX: 0, dragDY: 0, duration: 1.1, ease: "power2.out" });
+  drag = null;
+}
+stage.addEventListener("pointerup", releaseDrag);
+stage.addEventListener("pointercancel", releaseDrag);
+
+/* ============================================================
+   5. SWITCHES + KNOBS
+   ============================================================ */
+
+const root = document.documentElement;
+const themeToggle = document.getElementById("themeToggle");
+const ttLabel = document.getElementById("ttLabel");
+
+function setTheme(mode) {
+  root.dataset.theme = mode;
+  const isDark = mode === "dark";
+  themeToggle.setAttribute("aria-checked", String(isDark));
+  ttLabel.textContent = isDark ? "Light" : "Dark";
+}
+setTheme(window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+themeToggle.addEventListener("click", () => {
+  setTheme(root.dataset.theme === "dark" ? "light" : "dark");
+});
+
+const gridToggle = document.getElementById("gridToggle");
+gridToggle.addEventListener("click", () => {
+  const on = gridToggle.getAttribute("aria-checked") !== "true";
+  gridToggle.setAttribute("aria-checked", String(on));
+  latticeLayer.classList.toggle("on", on);
+});
+
+["slack","gravity","damping"].forEach(key => {
+  const input = document.getElementById(key);
+  const out = document.getElementById(key + "Out");
+  input.addEventListener("input", () => {
+    SETTINGS[key] = parseFloat(input.value);
+    out.textContent = input.value;
+  });
+});
+
+const thickInput = document.getElementById("thickness");
+const thickOut   = document.getElementById("thicknessOut");
+thickInput.addEventListener("input", () => {
+  SETTINGS.thickness = parseFloat(thickInput.value);
+  thickOut.textContent = thickInput.value + "px";
+  applyThickness();
+});
+</script>
+</body>
+</html>
