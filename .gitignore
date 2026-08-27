@@ -11,3 +11,6 @@ coverage/
 .DS_Store
 *.log
 .vercel
+
+# TypeScript incremental build cache
+*.tsbuildinfo
