@@ -12,20 +12,20 @@
 import { jitter } from '@/lib/motion';
 
 /**
- * Flat bottom, semicircular top. Width 115, height 93, radius 57.5.
+ * Flat bottom, semicircular top. Width 115, height 104, radius 57.5.
  *
- * Wider than tall, so the arch dominates and the straight sides are a short
- * skirt beneath it. The face sits in the widest part rather than below it.
+ * Slightly wider than tall. The arch dominates and the straight sides are a
+ * skirt beneath it; the face sits in the widest part rather than below it.
  */
 const WIDTH = 115;
-const HEIGHT = 93;
+const HEIGHT = 104;
 const DOME = `M0,${HEIGHT} L0,57.5 A57.5,57.5 0 0 1 ${WIDTH},57.5 L${WIDTH},${HEIGHT} Z`;
 
 // High in the arch, where the shape is widest, with a generous skirt beneath.
 // Pushed lower and the face reads as sliding off its own chin.
-const EYE_Y = 50;
+const EYE_Y = 56;
 const EYE_X = 37;
-const MOUTH_Y = 67;
+const MOUTH_Y = 75;
 
 const EYE_STYLES = ['dots', 'dashes', 'happy'] as const;
 const MOUTH_STYLES = ['none', 'smile', 'wry'] as const;
@@ -69,8 +69,8 @@ function Hair({ style, clipId }: { style: HairStyle; clipId: string }) {
   if (style === 'none') return null;
   const d =
     style === 'fringe'
-      ? 'M-7,-7 L122,-7 L122,17 C101,22 91,12 72,19 C59,25 49,16 36,25 C24,32 9,28 -7,39 Z'
-      : 'M-7,-7 L122,-7 L122,10 C95,17 79,9 61,16 C45,22 29,12 -7,22 Z';
+      ? 'M-7,-7 L122,-7 L122,19 C101,25 91,13 72,21 C59,28 49,18 36,28 C24,36 9,31 -7,44 Z'
+      : 'M-7,-7 L122,-7 L122,11 C95,19 79,10 61,18 C45,25 29,13 -7,25 Z';
   return (
     <g clipPath={`url(#${clipId})`}>
       <path d={d} fill="hsl(24 30% 15%)" />
