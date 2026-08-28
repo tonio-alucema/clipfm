@@ -55,3 +55,14 @@ export const POST_SEEK_CHECK_MS = SEEK_SETTLE_MS + 250;
  * playback that is already running.
  */
 export const STALL_RECOVERY_DELAY_MS = 1_000;
+
+/**
+ * How many times to retry a stall before giving up.
+ *
+ * A buffering stall clears in a retry or two. Something else holding the audio
+ * — another tab of the same room, since the widget only lets one instance play
+ * per browser — never clears, and retrying forever turns it into a fight where
+ * each tab preempts the last. Measured 28 corrections in a window that should
+ * have needed none.
+ */
+export const MAX_STALL_RECOVERY_ATTEMPTS = 3;

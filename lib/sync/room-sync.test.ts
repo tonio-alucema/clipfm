@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { LoadOutcome, PlayerState, RoomPlayer } from '../player/types';
 import { FIXTURE_TRACKS } from '../fixtures/tracks';
-import { DRIFT_CHECK_INTERVAL_MS } from '../config/sync';
+import { DRIFT_CHECK_INTERVAL_MS, MAX_STALL_RECOVERY_ATTEMPTS } from '../config/sync';
 import { createRoomSync, shouldCorrect } from './room-sync';
 
 const CRAWFISH = FIXTURE_TRACKS[0]!;
@@ -226,6 +226,42 @@ describe('createRoomSync', () => {
     sync.stop();
 
     expect(calls.seeks.at(-1)).toBe(90_000);
+  });
+
+  // The widget only lets one instance play per browser, so a second tab of the
+  // same room preempts the first. Retrying forever turns that into a fight in
+  // which each tab steals the audio back: measured 28 corrections in a window
+  // that should have needed none.
+  it('gives up rather than fighting whatever holds the audio', async () => {
+    vi.useFakeTimers();
+    try {
+      const base = fakePlayer();
+      const { calls, setState } = base;
+      // Playback is taken away the instant it is asked for, so the player
+      // never reaches 'playing' and the attempt budget is never refunded.
+      const player = { ...base.player, play: () => void (calls.plays += 1) };
+
+      const sync = createRoomSync({
+        player,
+        tracks: FIXTURE_TRACKS,
+        epochMs: EPOCH,
+        serverNow: () => EPOCH + 30_000,
+        onChange: () => {},
+        perfNow: () => 0,
+      });
+
+      await sync.tuneIn();
+      const playsAfterJoin = calls.plays;
+
+      setState('stalled');
+      await vi.advanceTimersByTimeAsync(DRIFT_CHECK_INTERVAL_MS * 10);
+      sync.stop();
+
+      expect(sync.getSnapshot().contended).toBe(true);
+      expect(calls.plays - playsAfterJoin).toBeLessThanOrEqual(MAX_STALL_RECOVERY_ATTEMPTS);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does nothing at all with an empty playlist', async () => {

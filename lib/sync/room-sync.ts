@@ -18,6 +18,7 @@ import {
   DRIFT_CHECK_INTERVAL_MS,
   DRIFT_CORRECTION_THRESHOLD_MS,
   JOIN_CORRECTION_THRESHOLD_MS,
+  MAX_STALL_RECOVERY_ATTEMPTS,
   MAX_TIMER_MS,
   POST_SEEK_CHECK_MS,
   SEEK_SETTLE_MS,
@@ -39,6 +40,11 @@ export type SyncSnapshot = {
   loadedTrackIndex: number | null;
   tunedIn: boolean;
   unavailable: boolean;
+  /**
+   * We stopped trying to recover. Something is holding the audio that retrying
+   * will not release — most likely this room open in another tab.
+   */
+  contended: boolean;
 };
 
 export const INITIAL_SNAPSHOT: SyncSnapshot = {
@@ -51,6 +57,7 @@ export const INITIAL_SNAPSHOT: SyncSnapshot = {
   loadedTrackIndex: null,
   tunedIn: false,
   unavailable: false,
+  contended: false,
 };
 
 export type CorrectionInput = {
@@ -128,6 +135,7 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
   let boundaryTimer: ReturnType<typeof setTimeout> | null = null;
   let postSeekTimer: ReturnType<typeof setTimeout> | null = null;
   let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  let recoveryAttempts = 0;
 
   function emit(patch: Partial<SyncSnapshot>): void {
     snapshot = { ...snapshot, ...patch };
@@ -138,13 +146,7 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     if (stopped) return;
     emit({ playerState });
 
-    // Recover from silence promptly rather than waiting out the drift poll.
-    if (playerState === 'stalled' && snapshot.tunedIn && recoveryTimer === null) {
-      recoveryTimer = setTimeout(() => {
-        recoveryTimer = null;
-        void transition();
-      }, STALL_RECOVERY_DELAY_MS);
-    }
+    if (playerState === 'stalled' && snapshot.tunedIn) attemptRecovery();
 
     if (playerState !== 'playing' || !awaitingFirstPlay) return;
 
@@ -155,6 +157,25 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     lastSeekAtPerf = perfNow();
     emit({ position: current, targetMs: current.offsetMs });
   });
+
+  /**
+   * Retry a stall on a backoff, and stop entirely once the budget is spent.
+   * Every path that notices a stall goes through here — a second entry point
+   * would silently spend an unbounded number of attempts.
+   */
+  function attemptRecovery(): void {
+    if (stopped || recoveryTimer !== null) return;
+    if (recoveryAttempts >= MAX_STALL_RECOVERY_ATTEMPTS) {
+      emit({ contended: true });
+      return;
+    }
+    const backoffMs = STALL_RECOVERY_DELAY_MS * 2 ** recoveryAttempts;
+    recoveryAttempts += 1;
+    recoveryTimer = setTimeout(() => {
+      recoveryTimer = null;
+      void transition();
+    }, backoffMs);
+  }
 
   function armBoundaryTimer(): void {
     if (boundaryTimer !== null) clearTimeout(boundaryTimer);
@@ -233,7 +254,7 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     // Re-entering the transition restarts playback and re-places the needle.
     if (player.getState() === 'stalled') {
       emit({ playerState: 'stalled' });
-      void transition();
+      attemptRecovery();
       return;
     }
 
@@ -251,6 +272,14 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     const targetMs = current.offsetMs;
     const driftMs = actualMs - targetMs;
     const playerState = player.getState();
+
+    // Surviving a whole poll interval still playing means the audio is really
+    // ours. Anything earlier is indistinguishable from winning one round of a
+    // fight we are about to lose again.
+    if (playerState === 'playing') {
+      recoveryAttempts = 0;
+      if (snapshot.contended) emit({ contended: false });
+    }
 
     let { corrections } = snapshot;
     if (
@@ -293,7 +322,8 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
       boundaryTimer = null;
       postSeekTimer = null;
       recoveryTimer = null;
-      emit({ tunedIn: false, driftMs: null, actualMs: null });
+      recoveryAttempts = 0;
+      emit({ tunedIn: false, driftMs: null, actualMs: null, contended: false });
     },
     stop() {
       stopped = true;

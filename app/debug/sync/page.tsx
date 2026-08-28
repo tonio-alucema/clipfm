@@ -198,6 +198,7 @@ export default function SyncHarness() {
         {snapshot.tunedIn ? 'tuned in' : 'not tuned in'} — player:{' '}
         <strong>{snapshot.playerState}</strong>
         {snapshot.unavailable && ' — TRACK UNAVAILABLE'}
+        {snapshot.contended && ' — AUDIO HELD ELSEWHERE (gave up retrying)'}
       </p>
       {/* Says out loud what the schedule model implies, so the radio metaphor
           is set before any real UI exists. */}
