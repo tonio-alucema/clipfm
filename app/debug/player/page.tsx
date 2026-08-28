@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FIXTURE_TRACKS } from '@/lib/fixtures/tracks';
+import { FIXTURE_SET_URL } from '@/lib/fixtures/tracks';
 import { createSoundCloudPlayer } from '@/lib/player/soundcloud';
 import type { PlayerState, RoomPlayer } from '@/lib/player/types';
 import { widgetIframeSrc } from '@/lib/player/widget-api';
@@ -24,7 +24,7 @@ export default function PlayerHarness() {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const playerRef = useRef<RoomPlayer | null>(null);
 
-  const [trackUrl, setTrackUrl] = useState<string>(FIXTURE_TRACKS[0]?.url ?? '');
+  const [trackUrl, setTrackUrl] = useState<string>(FIXTURE_SET_URL);
   const [state, setState] = useState<PlayerState>('idle');
   const [positionMs, setPositionMs] = useState<number | null>(null);
   const [log, setLog] = useState<string[]>([]);
@@ -48,6 +48,7 @@ export default function PlayerHarness() {
     let player: RoomPlayer | null = null;
 
     createSoundCloudPlayer(iframe, {
+      setUrl: trackUrl,
       onWidgetEvent: (name) => append(`widget: ${name}`),
     })
       .then((created) => {

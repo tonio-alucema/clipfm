@@ -16,8 +16,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DRIFT_PASS_BAR_MS, CLOCK_RESYNC_INTERVAL_MS } from '@/lib/config/sync';
-import { FIXTURE_EPOCH_MS, FIXTURE_TRACKS } from '@/lib/fixtures/tracks';
-import { createSoundCloudPlayer } from '@/lib/player/soundcloud';
+import { FIXTURE_EPOCH_MS, FIXTURE_SET_URL, FIXTURE_TRACKS } from '@/lib/fixtures/tracks';
+import { createSoundCloudPlayer, type SoundCloudPlayer } from '@/lib/player/soundcloud';
 import type { RoomPlayer } from '@/lib/player/types';
 import { widgetIframeSrc } from '@/lib/player/widget-api';
 import { positionAt, totalDurationMs } from '@/lib/schedule';
@@ -36,7 +36,7 @@ const ms = (value: number | null) =>
 
 export default function SyncHarness() {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const playerRef = useRef<RoomPlayer | null>(null);
+  const playerRef = useRef<SoundCloudPlayer | null>(null);
   const syncRef = useRef<ReturnType<typeof createRoomSync> | null>(null);
   const clockRef = useRef<ClockOffset | null>(null);
 
@@ -46,6 +46,7 @@ export default function SyncHarness() {
   const [liveTargetMs, setLiveTargetMs] = useState<number | null>(null);
   const [liveActualMs, setLiveActualMs] = useState<number | null>(null);
   const [liveTrack, setLiveTrack] = useState<string>('—');
+  const [widgetTrack, setWidgetTrack] = useState<string>('—');
   const [error, setError] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
 
@@ -115,10 +116,11 @@ export default function SyncHarness() {
     if (iframe === null || epochMs === null) return;
 
     let cancelled = false;
-    let player: RoomPlayer | null = null;
+    let player: SoundCloudPlayer | null = null;
     let sync: ReturnType<typeof createRoomSync> | null = null;
 
     void createSoundCloudPlayer(iframe, {
+      setUrl: FIXTURE_SET_URL,
       onWidgetEvent: (name) => {
         // playProgress fires constantly and would bury everything else.
         if (name === 'playProgress' || name === 'loadProgress') return;
@@ -132,6 +134,8 @@ export default function SyncHarness() {
         }
         player = created;
         playerRef.current = created;
+        // Debug handles. Harness only.
+        Object.assign(window, { __player: created });
         sync = createRoomSync({
           player: created,
           tracks: FIXTURE_TRACKS,
@@ -140,6 +144,7 @@ export default function SyncHarness() {
           onChange: setSnapshot,
         });
         syncRef.current = sync;
+        Object.assign(window, { __sync: sync });
       })
       .catch((cause: unknown) => {
         setError(cause instanceof Error ? cause.message : String(cause));
@@ -167,6 +172,8 @@ export default function SyncHarness() {
           ? `#${position.trackIndex} ${position.track.artist} — ${position.track.title}`
           : '—',
       );
+      const loaded = playerRef.current?.getLoadedSound() ?? null;
+      setWidgetTrack(loaded === null ? '—' : `${loaded.artist} — ${loaded.title}`);
       void playerRef.current?.getPosition().then((actual) => {
         setLiveActualMs(Number.isFinite(actual) ? actual : null);
       });
@@ -226,7 +233,10 @@ export default function SyncHarness() {
         {/* Computed straight from the schedule, so tabs can be compared
             before anyone tunes in. */}
         <li>schedule says: {liveTrack}</li>
-        <li>player loaded: {track === null ? '—' : `${track.artist} — ${track.title}`}</li>
+        {/* What the widget actually holds. Showing the schedule's track here
+            once hid a bug where the right position was seeked on the wrong
+            song and the drift number looked perfect. */}
+        <li>widget holds: {widgetTrack}</li>
         <li>epoch: {epochMs ?? '—'}</li>
         <li>revolution: {totalDurationMs(FIXTURE_TRACKS)} ms</li>
       </ul>
@@ -250,7 +260,7 @@ export default function SyncHarness() {
       <iframe
         ref={iframeRef}
         title="SoundCloud player"
-        src={widgetIframeSrc(FIXTURE_TRACKS[0]?.url ?? '')}
+        src={widgetIframeSrc(FIXTURE_SET_URL)}
         allow="autoplay"
         width="100%"
         height="120"
