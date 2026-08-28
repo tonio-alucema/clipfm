@@ -202,6 +202,32 @@ describe('createRoomSync', () => {
     }
   });
 
+  it('stops listening on tune out without stopping the schedule', async () => {
+    const { player, calls, setState } = fakePlayer();
+    let now = EPOCH + 30_000;
+    const sync = createRoomSync({
+      player,
+      tracks: FIXTURE_TRACKS,
+      epochMs: EPOCH,
+      serverNow: () => now,
+      onChange: () => {},
+      perfNow: () => 0,
+    });
+
+    await sync.tuneIn();
+    sync.tuneOut();
+    expect(sync.getSnapshot().tunedIn).toBe(false);
+
+    // Time passes while tuned out. Tuning back in rejoins the room live
+    // rather than resuming where the listener left.
+    now = EPOCH + 90_000;
+    setState('ready');
+    await sync.tuneIn();
+    sync.stop();
+
+    expect(calls.seeks.at(-1)).toBe(90_000);
+  });
+
   it('does nothing at all with an empty playlist', async () => {
     const { player, calls } = fakePlayer();
     const sync = createRoomSync({

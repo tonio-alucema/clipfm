@@ -186,12 +186,26 @@ export default function SyncHarness() {
       {error !== null && <p role="alert">{error}</p>}
 
       <p>
-        <button type="button" onClick={() => void syncRef.current?.tuneIn()}>
-          Tune in
-        </button>{' '}
+        {snapshot.tunedIn ? (
+          <button type="button" onClick={() => syncRef.current?.tuneOut()}>
+            Tune out
+          </button>
+        ) : (
+          <button type="button" onClick={() => void syncRef.current?.tuneIn()}>
+            Tune in
+          </button>
+        )}{' '}
         {snapshot.tunedIn ? 'tuned in' : 'not tuned in'} — player:{' '}
         <strong>{snapshot.playerState}</strong>
         {snapshot.unavailable && ' — TRACK UNAVAILABLE'}
+      </p>
+      {/* Says out loud what the schedule model implies, so the radio metaphor
+          is set before any real UI exists. */}
+      <p>
+        <small>
+          The room plays whether or not you are listening. Tuning back in
+          rejoins wherever it has got to — it does not resume where you left.
+        </small>
       </p>
 
       <h2>Drift</h2>

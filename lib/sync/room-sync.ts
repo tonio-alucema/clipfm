@@ -94,8 +94,17 @@ export type RoomSyncOptions = {
 };
 
 export type RoomSync = {
-  /** Call from a user gesture. Autoplay is blocked without one. */
+  /**
+   * Join the room live. Call from a user gesture — autoplay is blocked
+   * without one.
+   */
   tuneIn: () => Promise<void>;
+  /**
+   * Leave the room. Deliberately not "pause": the schedule keeps running while
+   * you are out, so tuning back in rejoins wherever the room has got to, not
+   * where you left it. There is no resuming a broadcast.
+   */
+  tuneOut: () => void;
   stop: () => void;
   getSnapshot: () => SyncSnapshot;
 };
@@ -272,6 +281,19 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
           void checkDrift();
         }, DRIFT_CHECK_INTERVAL_MS);
       }
+    },
+    tuneOut() {
+      if (stopped) return;
+      player.pause();
+      if (driftTimer !== null) clearInterval(driftTimer);
+      if (boundaryTimer !== null) clearTimeout(boundaryTimer);
+      if (postSeekTimer !== null) clearTimeout(postSeekTimer);
+      if (recoveryTimer !== null) clearTimeout(recoveryTimer);
+      driftTimer = null;
+      boundaryTimer = null;
+      postSeekTimer = null;
+      recoveryTimer = null;
+      emit({ tunedIn: false, driftMs: null, actualMs: null });
     },
     stop() {
       stopped = true;
