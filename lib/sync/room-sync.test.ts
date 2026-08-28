@@ -1,0 +1,284 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { LoadOutcome, PlayerState, RoomPlayer } from '../player/types';
+import { FIXTURE_TRACKS } from '../fixtures/tracks';
+import { DRIFT_CHECK_INTERVAL_MS, MAX_STALL_RECOVERY_ATTEMPTS } from '../config/sync';
+import { createRoomSync, shouldCorrect } from './room-sync';
+
+const CRAWFISH = FIXTURE_TRACKS[0]!;
+const WILL_HE = FIXTURE_TRACKS[1]!;
+const EPOCH = 1_700_000_000_000;
+
+describe('shouldCorrect', () => {
+  const base = { driftMs: 5_000, playerState: 'playing' as PlayerState, msSinceSeek: 60_000 };
+
+  it('corrects a large drift in either direction', () => {
+    expect(shouldCorrect(base)).toBe(true);
+    expect(shouldCorrect({ ...base, driftMs: -5_000 })).toBe(true);
+  });
+
+  it('leaves small drift alone, since the correction is more audible', () => {
+    expect(shouldCorrect({ ...base, driftMs: 900 })).toBe(false);
+    expect(shouldCorrect({ ...base, driftMs: -900 })).toBe(false);
+  });
+
+  it('does not correct exactly at the threshold', () => {
+    expect(shouldCorrect({ ...base, driftMs: 1_500 })).toBe(false);
+    expect(shouldCorrect({ ...base, driftMs: 1_501 })).toBe(true);
+  });
+
+  // A reading taken while buffering says nothing about drift, and seeking on
+  // it turns a stall into a seek/stall loop.
+  it('refuses to correct unless the player is actually playing', () => {
+    for (const playerState of ['idle', 'loading', 'ready', 'stalled', 'unavailable'] as const) {
+      expect(shouldCorrect({ ...base, playerState })).toBe(false);
+    }
+  });
+
+  it('refuses to correct on a missing position reading', () => {
+    expect(shouldCorrect({ ...base, driftMs: Number.NaN })).toBe(false);
+  });
+
+  it('waits for a previous seek to land before judging the next one', () => {
+    expect(shouldCorrect({ ...base, msSinceSeek: 0 })).toBe(false);
+    expect(shouldCorrect({ ...base, msSinceSeek: 1_499 })).toBe(false);
+    expect(shouldCorrect({ ...base, msSinceSeek: 1_501 })).toBe(true);
+  });
+});
+
+/** Records what the sync loop asked the player to do. */
+function fakePlayer(overrides: Partial<RoomPlayer> = {}) {
+  const calls = {
+    loaded: [] as string[],
+    seeks: [] as number[],
+    plays: 0,
+    sequence: [] as string[],
+  };
+  const listeners = new Set<(next: PlayerState) => void>();
+  let state: PlayerState = 'ready';
+
+  const setState = (next: PlayerState) => {
+    state = next;
+    for (const listener of listeners) listener(next);
+  };
+
+  const player: RoomPlayer = {
+    load: (url) => {
+      calls.loaded.push(url);
+      return Promise.resolve('ready' as LoadOutcome);
+    },
+    // Mirrors the real widget: playback begins, and the state change is what
+    // tells the sync loop it is finally safe to seek.
+    play: () => {
+      calls.plays += 1;
+      calls.sequence.push('play');
+      setState('playing');
+    },
+    pause: () => setState('ready'),
+    seekTo: (ms) => {
+      calls.seeks.push(ms);
+      calls.sequence.push('seek');
+    },
+    getPosition: () => Promise.resolve(0),
+    getState: () => state,
+    onStateChange: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    destroy: () => {},
+    ...overrides,
+  };
+  return { player, calls, setState };
+}
+
+describe('createRoomSync', () => {
+  it('joins mid-track: loads the right track and seeks to the right offset', async () => {
+    const { player, calls } = fakePlayer();
+    // 40s into the second track.
+    const now = EPOCH + CRAWFISH.durationMs + 40_000;
+
+    const sync = createRoomSync({
+      player,
+      tracks: FIXTURE_TRACKS,
+      epochMs: EPOCH,
+      serverNow: () => now,
+      onChange: () => {},
+      perfNow: () => 0,
+    });
+
+    await sync.tuneIn();
+    sync.stop();
+
+    expect(calls.loaded).toEqual([WILL_HE.url]);
+    expect(calls.seeks).toEqual([40_000]);
+    expect(calls.plays).toBe(1);
+  });
+
+  // The widget silently drops a seek on a track that has never played, so a
+  // join that seeks first lands at zero and plays the wrong part of the song.
+  it('plays before seeking on a fresh track', async () => {
+    const { player, calls } = fakePlayer();
+    const sync = createRoomSync({
+      player,
+      tracks: FIXTURE_TRACKS,
+      epochMs: EPOCH,
+      serverNow: () => EPOCH + 30_000,
+      onChange: () => {},
+      perfNow: () => 0,
+    });
+
+    await sync.tuneIn();
+    sync.stop();
+
+    expect(calls.sequence).toEqual(['play', 'seek']);
+    expect(calls.seeks).toEqual([30_000]);
+  });
+
+  it('starts at the top of the playlist at the epoch itself', async () => {
+    const { player, calls } = fakePlayer();
+    const sync = createRoomSync({
+      player,
+      tracks: FIXTURE_TRACKS,
+      epochMs: EPOCH,
+      serverNow: () => EPOCH,
+      onChange: () => {},
+      perfNow: () => 0,
+    });
+
+    await sync.tuneIn();
+    sync.stop();
+
+    expect(calls.loaded).toEqual([CRAWFISH.url]);
+    expect(calls.seeks).toEqual([0]);
+  });
+
+  it('reports an unavailable track instead of retrying it', async () => {
+    const load = vi.fn(() => Promise.resolve('unavailable' as LoadOutcome));
+    const { player } = fakePlayer({ load });
+    const sync = createRoomSync({
+      player,
+      tracks: FIXTURE_TRACKS,
+      epochMs: EPOCH,
+      serverNow: () => EPOCH,
+      onChange: () => {},
+      perfNow: () => 0,
+    });
+
+    await sync.tuneIn();
+    const snapshot = sync.getSnapshot();
+    sync.stop();
+
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(snapshot.unavailable).toBe(true);
+    expect(snapshot.loadedTrackIndex).toBe(0);
+  });
+
+  // shouldCorrect refuses to seek on a reading taken mid-stall, which is
+  // right. On its own it would also mean a stalled client sits frozen while
+  // drift grows without bound, so the loop has to treat a stall as its own
+  // recoverable condition.
+  it('recovers from a stall instead of watching drift grow', async () => {
+    vi.useFakeTimers();
+    try {
+      const { player, calls, setState } = fakePlayer();
+      const sync = createRoomSync({
+        player,
+        tracks: FIXTURE_TRACKS,
+        epochMs: EPOCH,
+        serverNow: () => EPOCH + 30_000,
+        onChange: () => {},
+        perfNow: () => 0,
+      });
+
+      await sync.tuneIn();
+      const playsBefore = calls.plays;
+
+      setState('stalled');
+      await vi.advanceTimersByTimeAsync(DRIFT_CHECK_INTERVAL_MS + 50);
+      sync.stop();
+
+      expect(calls.plays).toBeGreaterThan(playsBefore);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops listening on tune out without stopping the schedule', async () => {
+    const { player, calls, setState } = fakePlayer();
+    let now = EPOCH + 30_000;
+    const sync = createRoomSync({
+      player,
+      tracks: FIXTURE_TRACKS,
+      epochMs: EPOCH,
+      serverNow: () => now,
+      onChange: () => {},
+      perfNow: () => 0,
+    });
+
+    await sync.tuneIn();
+    sync.tuneOut();
+    expect(sync.getSnapshot().tunedIn).toBe(false);
+
+    // Time passes while tuned out. Tuning back in rejoins the room live
+    // rather than resuming where the listener left.
+    now = EPOCH + 90_000;
+    setState('ready');
+    await sync.tuneIn();
+    sync.stop();
+
+    expect(calls.seeks.at(-1)).toBe(90_000);
+  });
+
+  // The widget only lets one instance play per browser, so a second tab of the
+  // same room preempts the first. Retrying forever turns that into a fight in
+  // which each tab steals the audio back: measured 28 corrections in a window
+  // that should have needed none.
+  it('gives up rather than fighting whatever holds the audio', async () => {
+    vi.useFakeTimers();
+    try {
+      const base = fakePlayer();
+      const { calls, setState } = base;
+      // Playback is taken away the instant it is asked for, so the player
+      // never reaches 'playing' and the attempt budget is never refunded.
+      const player = { ...base.player, play: () => void (calls.plays += 1) };
+
+      const sync = createRoomSync({
+        player,
+        tracks: FIXTURE_TRACKS,
+        epochMs: EPOCH,
+        serverNow: () => EPOCH + 30_000,
+        onChange: () => {},
+        perfNow: () => 0,
+      });
+
+      await sync.tuneIn();
+      const playsAfterJoin = calls.plays;
+
+      setState('stalled');
+      await vi.advanceTimersByTimeAsync(DRIFT_CHECK_INTERVAL_MS * 10);
+      sync.stop();
+
+      expect(sync.getSnapshot().contended).toBe(true);
+      expect(calls.plays - playsAfterJoin).toBeLessThanOrEqual(MAX_STALL_RECOVERY_ATTEMPTS);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does nothing at all with an empty playlist', async () => {
+    const { player, calls } = fakePlayer();
+    const sync = createRoomSync({
+      player,
+      tracks: [],
+      epochMs: EPOCH,
+      serverNow: () => EPOCH,
+      onChange: () => {},
+      perfNow: () => 0,
+    });
+
+    await sync.tuneIn();
+    sync.stop();
+
+    expect(calls.loaded).toEqual([]);
+    expect(calls.seeks).toEqual([]);
+  });
+});
