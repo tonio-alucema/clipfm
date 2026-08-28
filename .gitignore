@@ -14,3 +14,6 @@ coverage/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Harvest artifact from /seed. The schedule row is the record, not this.
+seed.json
