@@ -17,7 +17,7 @@
 
 import { AnimatePresence } from 'framer-motion';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AvatarPill } from '@/components/avatar-pill';
+import { Avatar } from '@/components/avatar';
 import { HeartBurst } from '@/components/heart-burst';
 import { fetchActiveSchedule, type LiveSchedule } from '@/lib/db/schedules';
 import { favoriteTrack, fetchFavoriteCounts, type FavoriteOutcome } from '@/lib/favorites/favorites';
@@ -163,10 +163,19 @@ export default function RoomHarness() {
           ))}
         </AnimatePresence>
 
-        <ul style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', padding: 0, margin: 0 }}>
+        <ul
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'flex-end',
+            gap: '1.1rem',
+            padding: 0,
+            margin: 0,
+          }}
+        >
           <AnimatePresence initial={false} mode="popLayout">
             {listeners.map((present) => (
-              <AvatarPill
+              <Avatar
                 key={present.id}
                 id={present.id}
                 nickname={present.nickname}

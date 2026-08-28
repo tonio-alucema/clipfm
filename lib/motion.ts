@@ -36,6 +36,26 @@ export const SPRING = {
 } as const;
 
 /**
+ * The idle bob.
+ *
+ * Every avatar breathes, but never together. Identical synchronised motion
+ * across repeated elements reads as a broken loop rather than as life, so both
+ * the phase and the period vary per avatar — see `jitter`.
+ */
+export const IDLE_BOB = {
+  /** Vertical travel in px, peak to peak. Small: this is breathing, not bouncing. */
+  amplitude: 5,
+  /** Seconds for one rise and fall. */
+  period: 2.9,
+  /** Per-avatar phase offset spread. A full period, so the room is evenly out of step. */
+  phaseSpread: 2.9,
+  /** Per-avatar period variation, so they drift apart rather than re-syncing. */
+  periodSpread: 0.9,
+  /** Sideways sway, px. Just enough to stop the motion reading as an elevator. */
+  swayAmplitude: 2,
+} as const;
+
+/**
  * How long a heart lives on screen, in seconds.
  *
  * Shared between the burst animation and the code that expires it, so the two
