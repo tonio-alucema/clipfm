@@ -93,7 +93,7 @@ export function Avatar({ id, nickname, isSelf = false }: AvatarProps) {
         flexDirection: 'column',
         alignItems: 'center',
         gap: '0.4rem',
-        width: '5rem',
+        width: '5.6rem',
       }}
     >
       <div ref={bobRef}>

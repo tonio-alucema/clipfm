@@ -11,14 +11,21 @@
 
 import { jitter } from '@/lib/motion';
 
-/** Flat bottom, semicircular top. Width 100, height 116, radius 50. */
-const DOME = 'M0,116 L0,50 A50,50 0 0 1 100,50 L100,116 Z';
+/**
+ * Flat bottom, semicircular top. Width 115, height 93, radius 57.5.
+ *
+ * Wider than tall, so the arch dominates and the straight sides are a short
+ * skirt beneath it. The face sits in the widest part rather than below it.
+ */
+const WIDTH = 115;
+const HEIGHT = 93;
+const DOME = `M0,${HEIGHT} L0,57.5 A57.5,57.5 0 0 1 ${WIDTH},57.5 L${WIDTH},${HEIGHT} Z`;
 
-// Features sit in the lower middle with room to breathe beneath them. Pushed
-// much lower and the face reads as sliding off its own chin.
-const EYE_Y = 68;
-const EYE_X = 32;
-const MOUTH_Y = 88;
+// High in the arch, where the shape is widest, with a generous skirt beneath.
+// Pushed lower and the face reads as sliding off its own chin.
+const EYE_Y = 50;
+const EYE_X = 37;
+const MOUTH_Y = 67;
 
 const EYE_STYLES = ['dots', 'dashes', 'happy'] as const;
 const MOUTH_STYLES = ['none', 'smile', 'wry'] as const;
@@ -62,8 +69,8 @@ function Hair({ style, clipId }: { style: HairStyle; clipId: string }) {
   if (style === 'none') return null;
   const d =
     style === 'fringe'
-      ? 'M-6,-6 L106,-6 L106,21 C88,27 79,15 63,24 C51,31 43,20 31,31 C21,40 8,35 -6,49 Z'
-      : 'M-6,-6 L106,-6 L106,13 C83,21 69,11 53,20 C39,28 25,15 -6,28 Z';
+      ? 'M-7,-7 L122,-7 L122,17 C101,22 91,12 72,19 C59,25 49,16 36,25 C24,32 9,28 -7,39 Z'
+      : 'M-7,-7 L122,-7 L122,10 C95,17 79,9 61,16 C45,22 29,12 -7,22 Z';
   return (
     <g clipPath={`url(#${clipId})`}>
       <path d={d} fill="hsl(24 30% 15%)" />
@@ -78,8 +85,8 @@ function Mouth({ style }: { style: MouthStyle }) {
   // a cartoon.
   const d =
     style === 'wry'
-      ? `M37,${MOUTH_Y} Q50,${MOUTH_Y + 4} 63,${MOUTH_Y - 2}`
-      : `M36,${MOUTH_Y - 1} Q50,${MOUTH_Y + 7} 64,${MOUTH_Y - 1}`;
+      ? `M42,${MOUTH_Y} Q57.5,${MOUTH_Y + 4} 73,${MOUTH_Y - 2}`
+      : `M41,${MOUTH_Y - 1} Q57.5,${MOUTH_Y + 7} 74,${MOUTH_Y - 1}`;
   return (
     <path
       d={d}
@@ -87,7 +94,7 @@ function Mouth({ style }: { style: MouthStyle }) {
       strokeWidth={4.5}
       strokeLinecap="round"
       fill="none"
-      transform={`rotate(${tilt} 50 ${MOUTH_Y})`}
+      transform={`rotate(${tilt} 57.5 ${MOUTH_Y})`}
     />
   );
 }
@@ -98,7 +105,7 @@ export type AvatarFaceProps = {
   title?: string;
 };
 
-export function AvatarFace({ id, size = 64, title }: AvatarFaceProps) {
+export function AvatarFace({ id, size = 74, title }: AvatarFaceProps) {
   // Two hues rather than one, so the fill is a gradient with somewhere to go.
   const hue = Math.floor(jitter(id, 360));
   const hueShift = Math.floor(jitter(`${id}~shift`, 150)) - 60;
@@ -108,9 +115,9 @@ export function AvatarFace({ id, size = 64, title }: AvatarFaceProps) {
 
   return (
     <svg
-      viewBox="0 0 100 116"
+      viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
       width={size}
-      height={(size * 116) / 100}
+      height={(size * HEIGHT) / WIDTH}
       role={title === undefined ? 'presentation' : 'img'}
       aria-label={title}
       style={{ display: 'block', overflow: 'visible' }}
@@ -127,7 +134,7 @@ export function AvatarFace({ id, size = 64, title }: AvatarFaceProps) {
       <path d={DOME} fill={`url(#${gradientId})`} />
       <Hair style={pick(HAIR_STYLES, `${id}~hair`)} clipId={clipId} />
       <Eye x={EYE_X} style={pick(EYE_STYLES, `${id}~eyes`)} />
-      <Eye x={100 - EYE_X} style={pick(EYE_STYLES, `${id}~eyes`)} />
+      <Eye x={WIDTH - EYE_X} style={pick(EYE_STYLES, `${id}~eyes`)} />
       <Mouth style={pick(MOUTH_STYLES, `${id}~mouth`)} />
     </svg>
   );

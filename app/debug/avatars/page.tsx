@@ -44,7 +44,7 @@ export default function AvatarGallery() {
       <h2>Large, still</h2>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', alignItems: 'flex-end' }}>
         {NAMES.slice(0, 8).map((name) => (
-          <AvatarFace key={name} id={`gallery:${name}`} size={130} title={name} />
+          <AvatarFace key={name} id={`gallery:${name}`} size={150} title={name} />
         ))}
       </div>
     </main>
