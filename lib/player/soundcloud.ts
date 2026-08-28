@@ -1,35 +1,63 @@
 /**
- * `RoomPlayer` backed by the SoundCloud embed widget.
+ * `RoomPlayer` backed by the SoundCloud embed widget, driving a whole set.
+ *
+ * The iframe is pointed at a set once and never reloaded. Changing track is
+ * `skip(index)`, which keeps the same media element alive.
+ *
+ * That is not a micro-optimisation. `load()` rebuilds the iframe, producing a
+ * media element that no user has ever tapped, and mobile browsers refuse to
+ * start one. Measured: desktop crossed a track boundary at -30ms, while mobile
+ * played the first track and then went silent forever. `skip()` inherits the
+ * unlock from the original tune-in gesture.
  *
  * The widget is an iframe we do not control, driven over postMessage. Every
- * call is fire-and-forget and every reply is a callback that may never come,
- * so each await here is bounded by a timeout. A track that will not embed
- * off-platform typically produces silence rather than an error.
+ * call is fire-and-forget and every reply may never come, so each await is
+ * bounded by a timeout.
  */
 
 import { LOAD_TIMEOUT_MS, STALL_AFTER_MS, STALL_POLL_MS } from '../config/player';
+import {
+  indexSoundsByUrl,
+  normalizeTrackUrl,
+  parseWidgetSounds,
+  type WidgetSound,
+} from './sounds';
 import type { LoadOutcome, PlayerState, RoomPlayer } from './types';
 import { loadWidgetApi, WIDGET_DISPLAY_OPTIONS, type ScWidget } from './widget-api';
 
 const POSITION_TIMEOUT_MS = 2_000;
+const SKIP_CONFIRM_POLL_MS = 200;
+/**
+ * Best-effort only. A skip that has not visibly landed yet is not a failure —
+ * the drift check will notice and retry — so this budget is short and its
+ * expiry is not reported as unavailable.
+ */
+const SKIP_CONFIRM_BUDGET_MS = 2_500;
 
 export type SoundCloudPlayerOptions = {
   /**
-   * Debug sink for raw widget events. Used by the step 2 harness to learn what
-   * the widget actually emits; the room does not pass this.
+   * The set to drive. Loaded once here, at construction, and never again —
+   * every later track change is `skip()`.
    */
+  setUrl: string;
+  /** Debug sink for raw widget events. The room does not pass this. */
   onWidgetEvent?: (name: string, payload?: unknown) => void;
+};
+
+export type SoundCloudPlayer = RoomPlayer & {
+  /** Everything in the loaded set, for seeding and for the harness. */
+  getSounds: () => readonly WidgetSound[];
+  /** What the widget is actually holding — not what the schedule wants. */
+  getLoadedSound: () => WidgetSound | null;
 };
 
 export async function createSoundCloudPlayer(
   iframe: HTMLIFrameElement,
-  options: SoundCloudPlayerOptions = {},
-): Promise<RoomPlayer> {
+  options: SoundCloudPlayerOptions,
+): Promise<SoundCloudPlayer> {
   const sc = await loadWidgetApi();
   const widget: ScWidget = sc.Widget(iframe);
 
-  // Event name constants are read off the global rather than hardcoded, but
-  // fall back to the documented strings if a build omits them.
   const names = sc.Widget.Events;
   const EV = {
     ready: names.READY ?? 'ready',
@@ -43,9 +71,11 @@ export async function createSoundCloudPlayer(
 
   let state: PlayerState = 'idle';
   let wantsToPlay = false;
-  /** `performance.now()` of the last progress event — monotonic, unlike the clock. */
   let lastProgressAt = 0;
   let destroyed = false;
+  let sounds: WidgetSound[] = [];
+  let indexByUrl = new Map<string, number>();
+  let currentIndex: number | null = null;
 
   const listeners = new Set<(next: PlayerState) => void>();
 
@@ -73,26 +103,16 @@ export async function createSoundCloudPlayer(
   });
 
   on(EV.pause, () => {
-    // A pause we did ask for is just a pause. A pause we did not ask for means
-    // the widget stopped itself — buffering, throttled, or refusing to start
-    // because the user gesture that authorised playback has gone stale by the
-    // time load() settled and play() was finally called. That is a stall, and
-    // the sync loop knows how to recover from one.
+    // A pause we did not ask for means the widget stopped itself: buffering,
+    // or another instance of the widget taking the audio.
     setState(wantsToPlay ? 'stalled' : 'ready');
   });
 
-  // Nothing advances on FINISH. The schedule decides what plays; a finish only
-  // tells us the duration in the snapshot disagrees with reality.
+  // Nothing advances on FINISH. The schedule decides what plays.
   on(EV.finish, () => {});
-
-  // Bound purely so seeks show up in the harness log.
   on(EV.seek, () => {});
-
   on(EV.error, () => setState('unavailable'));
 
-  // Wait for the iframe to come up. Bounded, because binding after READY has
-  // already fired would otherwise hang forever. Note READY fires again after
-  // every `load()`, since `load()` reloads the iframe — it is not one-shot.
   await new Promise<void>((resolve) => {
     const timer = setTimeout(resolve, LOAD_TIMEOUT_MS);
     on(EV.ready, () => {
@@ -101,38 +121,135 @@ export async function createSoundCloudPlayer(
     });
   });
 
+  /**
+   * Read the set's manifest. One keyless call gives every track — but READY
+   * fires before the set is populated, so an early read comes back empty and
+   * every track then looks like it is not in the set.
+   */
+  async function readSounds(): Promise<void> {
+    const raw = await new Promise<unknown[]>((resolve) => {
+      const timer = setTimeout(() => resolve([]), POSITION_TIMEOUT_MS);
+      widget.getSounds((list) => {
+        clearTimeout(timer);
+        resolve(Array.isArray(list) ? list : []);
+      });
+    });
+    const parsed = parseWidgetSounds(raw);
+    if (parsed.length === 0) return;
+    sounds = parsed;
+    indexByUrl = indexSoundsByUrl(parsed);
+  }
+
+  async function ensureSounds(): Promise<void> {
+    const deadline = performance.now() + LOAD_TIMEOUT_MS;
+    let previousCount = -1;
+    let stableReads = 0;
+    while (!destroyed && performance.now() < deadline) {
+      await readSounds();
+      // The manifest fills in lazily, so a non-empty read is not a complete
+      // one. Wait for the count to stop growing.
+      if (sounds.length > 0 && sounds.length === previousCount) {
+        stableReads += 1;
+        if (stableReads >= 2) return;
+      } else {
+        stableReads = 0;
+        previousCount = sounds.length;
+      }
+      await new Promise((resolve) => setTimeout(resolve, SKIP_CONFIRM_POLL_MS));
+    }
+  }
+
+  /**
+   * Load the set once, here, before the listener has tapped anything.
+   *
+   * Pointing the iframe src at a set only yields a partial manifest — five of
+   * twenty-four in measurement — so a track deep in the set looks absent. An
+   * explicit load populates all of it. This is the only load() in the player's
+   * life: doing it now means the media element the listener later unlocks with
+   * their tap is the one that plays for the rest of the session.
+   */
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, LOAD_TIMEOUT_MS);
+    widget.load(options.setUrl, {
+      ...WIDGET_DISPLAY_OPTIONS,
+      auto_play: false,
+      callback: () => {
+        clearTimeout(timer);
+        resolve();
+      },
+    });
+  });
+
+  await ensureSounds();
+
+  function currentPermalink(): Promise<string | null> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), POSITION_TIMEOUT_MS);
+      widget.getCurrentSound((sound) => {
+        clearTimeout(timer);
+        const url =
+          typeof sound === 'object' && sound !== null
+            ? (sound as Record<string, unknown>)['permalink_url']
+            : null;
+        resolve(typeof url === 'string' ? url : null);
+      });
+    });
+  }
+
+  // Establish where the widget already is, so a join to the current track does
+  // not skip needlessly.
+  const startingUrl = await currentPermalink();
+  if (startingUrl !== null) {
+    currentIndex = indexByUrl.get(normalizeTrackUrl(startingUrl)) ?? null;
+  }
+
   const stallWatchdog = setInterval(() => {
     if (!wantsToPlay || state !== 'playing') return;
     if (performance.now() - lastProgressAt > STALL_AFTER_MS) setState('stalled');
   }, STALL_POLL_MS);
 
   async function load(trackUrl: string): Promise<LoadOutcome> {
-    wantsToPlay = false;
+    const wanted = normalizeTrackUrl(trackUrl);
+    // A miss may mean the manifest is still filling in rather than that the
+    // track is absent. Re-read once before writing a track off.
+    if (!indexByUrl.has(wanted)) await ensureSounds();
+
+    const index = indexByUrl.get(wanted);
+    if (index === undefined) {
+      // Not in the set. The clock keeps running; this is a state, not a crash.
+      setState('unavailable');
+      return 'unavailable';
+    }
+
+    if (index === currentIndex) {
+      if (state === 'unavailable' || state === 'idle') setState('ready');
+      return 'ready';
+    }
+
     setState('loading');
+    widget.skip(index);
+    currentIndex = index;
+    // skip() starts the new track on its own. Record that as intent, so the
+    // progress events it produces are recognised as playing rather than as an
+    // unrequested pause to recover from.
+    wantsToPlay = true;
+    lastProgressAt = performance.now();
 
-    const outcome = await new Promise<LoadOutcome>((resolve) => {
-      let settled = false;
-      const settle = (result: LoadOutcome) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(result);
-      };
-      const timer = setTimeout(() => settle('unavailable'), LOAD_TIMEOUT_MS);
+    // skip() is fire-and-forget, so wait for the widget to visibly move — but
+    // only briefly. 'unavailable' means "not in this set", which we already
+    // established synchronously above. A slow confirmation is not that, and
+    // reporting it as such would strand a track that is playing perfectly
+    // well.
+    const expected = normalizeTrackUrl(sounds[index]?.url ?? trackUrl);
+    const deadline = performance.now() + SKIP_CONFIRM_BUDGET_MS;
+    while (!destroyed && performance.now() < deadline) {
+      const actual = await currentPermalink();
+      if (actual !== null && normalizeTrackUrl(actual) === expected) break;
+      await new Promise((resolve) => setTimeout(resolve, SKIP_CONFIRM_POLL_MS));
+    }
 
-      widget.load(trackUrl, {
-        ...WIDGET_DISPLAY_OPTIONS,
-        auto_play: false,
-        callback: () => {
-          // The load callback fires even for a track that refuses off-platform
-          // embedding, so confirm a sound actually materialised.
-          widget.getCurrentSound((sound) => settle(sound ? 'ready' : 'unavailable'));
-        },
-      });
-    });
-
-    setState(outcome);
-    return outcome;
+    setState('ready');
+    return 'ready';
   }
 
   function getPosition(): Promise<number> {
@@ -144,9 +261,8 @@ export async function createSoundCloudPlayer(
         clearTimeout(timer);
         resolve(ms);
       };
-      // NaN means "no reading". Every comparison against it is false, so a
-      // drift check that misses a reply declines to correct rather than
-      // seeking on a guess.
+      // NaN means "no reading". Comparisons against it are false, so a drift
+      // check that misses a reply declines to correct rather than guessing.
       const timer = setTimeout(() => settle(Number.NaN), POSITION_TIMEOUT_MS);
       widget.getPosition(settle);
     });
@@ -170,16 +286,15 @@ export async function createSoundCloudPlayer(
     },
     getPosition,
     getState: () => state,
+    getSounds: () => sounds,
+    getLoadedSound: () => (currentIndex === null ? null : (sounds[currentIndex] ?? null)),
     onStateChange(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
     destroy() {
-      // Deliberately does not call `widget.unbind()`. Bindings are keyed by
-      // iframe inside the widget API, not by wrapper, so unbinding here would
-      // also strip the listeners of any other player sharing this iframe —
-      // which is exactly what happens under React StrictMode's double mount.
-      // Handlers check `destroyed` and no-op instead.
+      // Deliberately no widget.unbind(): bindings are keyed by iframe, so
+      // unbinding would strip the listeners of any other player sharing it.
       destroyed = true;
       clearInterval(stallWatchdog);
       listeners.clear();

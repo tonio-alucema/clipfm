@@ -11,6 +11,12 @@ import type { Track } from '../schedule';
  * the check that matters — oEmbed resolving proves the track exists, not that
  * it will play off-platform.
  */
+/**
+ * The widget is pointed at this set once and never reloaded; track changes are
+ * `skip(index)` within it. Every track in a schedule must be a member.
+ */
+export const FIXTURE_SET_URL = 'https://soundcloud.com/tonioalucema/sets/tonio-sandbox';
+
 export const FIXTURE_TRACKS: Track[] = [
   {
     url: 'https://soundcloud.com/elvissonymusic/crawfish-2',
