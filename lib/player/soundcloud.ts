@@ -73,8 +73,12 @@ export async function createSoundCloudPlayer(
   });
 
   on(EV.pause, () => {
-    // A pause we did not ask for is the widget buffering or being throttled.
-    if (!wantsToPlay) setState('ready');
+    // A pause we did ask for is just a pause. A pause we did not ask for means
+    // the widget stopped itself — buffering, throttled, or refusing to start
+    // because the user gesture that authorised playback has gone stale by the
+    // time load() settled and play() was finally called. That is a stall, and
+    // the sync loop knows how to recover from one.
+    setState(wantsToPlay ? 'stalled' : 'ready');
   });
 
   // Nothing advances on FINISH. The schedule decides what plays; a finish only
