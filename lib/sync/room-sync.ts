@@ -202,8 +202,9 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     }
 
     busy = true;
+    const changedTrack = snapshot.loadedTrackIndex !== position.trackIndex;
     try {
-      if (snapshot.loadedTrackIndex !== position.trackIndex) {
+      if (changedTrack) {
         const outcome = await player.load(position.track.url);
         if (stopped) return;
         // Record the index even when the track will not play, so we do not
@@ -220,14 +221,16 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
       const current = positionAt(tracks, epochMs, serverNow());
       if (current.kind !== 'playing') return;
 
-      if (snapshot.tunedIn && player.getState() !== 'playing') {
-        // Seeking now would be dropped. Start playback and let the state
-        // change above place the needle.
-        awaitingFirstPlay = true;
-        player.play();
-      } else {
+      if (player.getState() === 'playing') {
         player.seekTo(current.offsetMs);
         lastSeekAtPerf = perfNow();
+      } else if (snapshot.tunedIn) {
+        // Seeking a track that has not started is dropped, so wait for
+        // playback and let the state change above place the needle. A track
+        // change already started itself; calling play() on top of that only
+        // produces pause/play churn.
+        awaitingFirstPlay = true;
+        if (!changedTrack) player.play();
       }
 
       emit({ position: current, targetMs: current.offsetMs, unavailable: false });
@@ -301,15 +304,23 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
   }
 
   return {
-    async tuneIn() {
-      if (stopped) return;
+    tuneIn() {
+      if (stopped) return Promise.resolve();
+
+      // Synchronous, before any await. Mobile browsers only unlock playback
+      // from inside the gesture that asked for it, and an awaited load in
+      // between means the tap no longer counts. This may sound the wrong
+      // track for a moment; the transition below corrects it immediately.
+      player.play();
       emit({ tunedIn: true });
-      await transition();
+
+      const positioned = transition();
       if (driftTimer === null) {
         driftTimer = setInterval(() => {
           void checkDrift();
         }, DRIFT_CHECK_INTERVAL_MS);
       }
+      return positioned;
     },
     tuneOut() {
       if (stopped) return;
