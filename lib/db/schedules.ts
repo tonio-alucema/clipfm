@@ -12,6 +12,8 @@ import { getSupabase } from './client';
 
 export type LiveSchedule = {
   scheduleId: string;
+  /** Favourites reference the room by id, not by slug. */
+  roomId: string;
   roomSlug: string;
   roomName: string;
   /** The set the player loads once and skips within. */
@@ -72,13 +74,15 @@ export async function fetchActiveSchedule(roomSlug: string): Promise<LiveSchedul
 
   const { data: room, error: roomError } = await supabase
     .from('rooms')
-    .select('slug, name, active_schedule_id')
+    .select('id, slug, name, active_schedule_id')
     .eq('slug', roomSlug)
     .maybeSingle();
 
   if (roomError !== null || room === null) return null;
-  const activeScheduleId = (room as Record<string, unknown>)['active_schedule_id'];
-  if (typeof activeScheduleId !== 'string') return null;
+  const roomRow = room as Record<string, unknown>;
+  const activeScheduleId = roomRow['active_schedule_id'];
+  const roomId = roomRow['id'];
+  if (typeof activeScheduleId !== 'string' || typeof roomId !== 'string') return null;
 
   const { data: schedule, error: scheduleError } = await supabase
     .from('schedules')
@@ -95,8 +99,9 @@ export async function fetchActiveSchedule(roomSlug: string): Promise<LiveSchedul
 
   return {
     scheduleId: activeScheduleId,
-    roomSlug: readString(room as Record<string, unknown>, 'slug') ?? roomSlug,
-    roomName: readString(room as Record<string, unknown>, 'name') ?? roomSlug,
+    roomId,
+    roomSlug: readString(roomRow, 'slug') ?? roomSlug,
+    roomName: readString(roomRow, 'name') ?? roomSlug,
     setUrl,
     epochMs,
     tracks: parseScheduleTracks(row['tracks']),
