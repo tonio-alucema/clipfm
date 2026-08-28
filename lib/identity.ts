@@ -30,6 +30,33 @@ export function randomNickname(random: () => number = Math.random): string {
   return `${adjective} ${noun}`;
 }
 
+/**
+ * A stable, well-formed UUID derived from a name.
+ *
+ * Listener ids are stored in a `uuid` column, so a readable id like
+ * "debug-alpha" is rejected by the database — which is exactly how the
+ * harness's debug listeners silently failed to favourite anything. Hashing
+ * the name keeps the id stable across reloads while remaining a real UUID.
+ */
+export function deterministicUuid(seed: string): string {
+  const words = [0, 1, 2, 3].map((salt) => {
+    let hash = (0x811c9dc5 ^ salt) >>> 0;
+    for (let i = 0; i < seed.length; i++) {
+      hash ^= seed.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash >>> 0;
+  });
+  const hex = words.map((word) => word.toString(16).padStart(8, '0')).join('');
+
+  // Force version 4 and the RFC variant so the result is a valid UUID.
+  const version = `4${hex.slice(13, 16)}`;
+  const variantNibble = ((Number.parseInt(hex[16] ?? '0', 16) & 0x3) | 0x8).toString(16);
+  const variant = `${variantNibble}${hex.slice(17, 20)}`;
+
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${version}-${variant}-${hex.slice(20, 32)}`;
+}
+
 /** Accepts anything storable; returns null for anything that is not a listener. */
 export function parseListener(raw: string | null): Listener | null {
   if (raw === null) return null;
