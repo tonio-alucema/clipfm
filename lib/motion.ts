@@ -36,6 +36,14 @@ export const SPRING = {
 } as const;
 
 /**
+ * How long a heart lives on screen, in seconds.
+ *
+ * Shared between the burst animation and the code that expires it, so the two
+ * cannot drift apart and leave hearts hanging or cut them off mid-flight.
+ */
+export const HEART_BURST_SECONDS = DURATION.slow * 2;
+
+/**
  * A stable per-instance offset in the range [0, spread).
  *
  * Twelve pills bobbing in unison reads as broken, not alive — so repeated
