@@ -350,6 +350,11 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
         if (!changedTrack) player.play();
       }
 
+      // Nothing may be audible until someone tunes in. skip() starts playback
+      // by itself, so positioning the widget would otherwise have the room
+      // playing to a listener who never asked it to.
+      if (!snapshot.tunedIn) player.pause();
+
       emit({
         position: current,
         targetMs: current.offsetMs,
@@ -455,6 +460,20 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
       seekLatencyMs,
     });
   }
+
+  // Put the widget on the scheduled track immediately, before anyone taps.
+  //
+  // tuneIn() has to call play() synchronously — on mobile the tap is the only
+  // thing that unlocks audio, and an await in between spends it. But whatever
+  // the widget happens to be sitting on is what that play() starts, which was
+  // the first track of the set: a second of the wrong song, then an audible
+  // skip to the right one.
+  //
+  // Loading here is silent. Nothing plays, because nothing is tuned in yet, so
+  // there is no gesture to lose and nothing to hear. By the time the tap
+  // arrives the right track is already loaded and play() starts the right
+  // music.
+  void transition();
 
   return {
     tuneIn() {
