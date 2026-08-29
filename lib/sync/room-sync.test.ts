@@ -1,8 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { LoadOutcome, PlayerState, RoomPlayer } from '../player/types';
 import { FIXTURE_TRACKS } from '../fixtures/tracks';
-import { DRIFT_CHECK_INTERVAL_MS, MAX_STALL_RECOVERY_ATTEMPTS } from '../config/sync';
-import { createRoomSync, shouldCorrect } from './room-sync';
+import {
+  DRIFT_CHECK_INTERVAL_MS,
+  MAX_SEEK_LATENCY_MS,
+  MAX_STALL_RECOVERY_ATTEMPTS,
+  SEEK_COMPENSATION_MARGIN_MS,
+} from '../config/sync';
+import {
+  compensatedSeekTarget,
+  createRoomSync,
+  nextSeekLatency,
+  shouldCorrect,
+} from './room-sync';
 
 const CRAWFISH = FIXTURE_TRACKS[0]!;
 const WILL_HE = FIXTURE_TRACKS[1]!;
@@ -42,6 +52,70 @@ describe('shouldCorrect', () => {
     expect(shouldCorrect({ ...base, msSinceSeek: 0 })).toBe(false);
     expect(shouldCorrect({ ...base, msSinceSeek: 1_499 })).toBe(false);
     expect(shouldCorrect({ ...base, msSinceSeek: 1_501 })).toBe(true);
+  });
+});
+
+describe('nextSeekLatency', () => {
+  // The feedback loop: what we would observe is `estimate - trueLatency`.
+  it('converges on the true latency', () => {
+    const TRUE_LATENCY = 750;
+    let estimate = 0;
+    for (let i = 0; i < 25; i++) {
+      estimate = nextSeekLatency(estimate, estimate - TRUE_LATENCY);
+    }
+    expect(estimate).toBeCloseTo(TRUE_LATENCY, 0);
+  });
+
+  // The mistake this formulation exists to avoid. Sampling `-drift` would work
+  // exactly once: as soon as compensation landed on target, drift would read
+  // zero and the estimate would decay away with it, undoing itself.
+  it('holds once converged rather than decaying back to zero', () => {
+    let estimate = 750;
+    for (let i = 0; i < 25; i++) estimate = nextSeekLatency(estimate, 0);
+    expect(estimate).toBe(750);
+  });
+
+  it('comes back down when seeks start landing early', () => {
+    expect(nextSeekLatency(1_000, 400)).toBeLessThan(1_000);
+  });
+
+  it('refuses to go negative — a seek cannot land before it was asked for', () => {
+    expect(nextSeekLatency(0, 5_000)).toBe(0);
+  });
+
+  it('is capped, because a huge reading is something else broken', () => {
+    expect(nextSeekLatency(0, -1_000_000)).toBe(MAX_SEEK_LATENCY_MS);
+  });
+
+  it('ignores a missing reading rather than treating it as zero drift', () => {
+    expect(nextSeekLatency(750, Number.NaN)).toBe(750);
+  });
+});
+
+describe('compensatedSeekTarget', () => {
+  it('aims ahead by however late seeks have been landing', () => {
+    expect(compensatedSeekTarget(30_000, 750, 200_000)).toBe(30_750);
+  });
+
+  it('changes nothing when seeks land instantly', () => {
+    expect(compensatedSeekTarget(30_000, 0, 200_000)).toBe(30_000);
+  });
+
+  // Overshooting the end of a track lands nowhere, and a transition that close
+  // is the boundary timer's job.
+  it('never aims into the last moments of a track', () => {
+    const duration = 100_000;
+    expect(compensatedSeekTarget(99_000, 2_000, duration)).toBe(
+      duration - SEEK_COMPENSATION_MARGIN_MS,
+    );
+  });
+
+  it('never aims backwards, even past the margin', () => {
+    expect(compensatedSeekTarget(99_900, 2_000, 100_000)).toBe(99_900);
+  });
+
+  it('never aims before the start', () => {
+    expect(compensatedSeekTarget(0, 0, 100_000)).toBe(0);
   });
 });
 
@@ -259,6 +333,40 @@ describe('createRoomSync', () => {
 
       expect(sync.getSnapshot().contended).toBe(true);
       expect(calls.plays - playsAfterJoin).toBeLessThanOrEqual(MAX_STALL_RECOVERY_ATTEMPTS);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // End to end: a reading that says we are behind should both teach the loop
+  // how late seeks land AND have the resulting correction already aim ahead.
+  it('corrects using the latency it just learned', async () => {
+    vi.useFakeTimers();
+    try {
+      let perf = 0;
+      const base = fakePlayer();
+      const { calls } = base;
+      // Playing 5s behind where the schedule says we should be.
+      const player = { ...base.player, getPosition: () => Promise.resolve(25_000) };
+
+      const sync = createRoomSync({
+        player,
+        tracks: FIXTURE_TRACKS,
+        epochMs: EPOCH,
+        serverNow: () => EPOCH + 30_000,
+        onChange: () => {},
+        perfNow: () => perf,
+      });
+
+      await sync.tuneIn();
+      perf = 100_000; // long enough after the join seek for a settled reading
+      await vi.advanceTimersByTimeAsync(DRIFT_CHECK_INTERVAL_MS + 50);
+      const snapshot = sync.getSnapshot();
+      sync.stop();
+
+      expect(snapshot.seekLatencyMs).toBeGreaterThan(0);
+      // The correction aims past the target by exactly what it just learned.
+      expect(calls.seeks.at(-1)).toBe(30_000 + snapshot.seekLatencyMs);
     } finally {
       vi.useRealTimers();
     }

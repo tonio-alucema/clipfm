@@ -18,8 +18,11 @@ import {
   DRIFT_CHECK_INTERVAL_MS,
   DRIFT_CORRECTION_THRESHOLD_MS,
   JOIN_CORRECTION_THRESHOLD_MS,
+  MAX_SEEK_LATENCY_MS,
   MAX_STALL_RECOVERY_ATTEMPTS,
   MAX_TIMER_MS,
+  SEEK_COMPENSATION_MARGIN_MS,
+  SEEK_LATENCY_SMOOTHING,
   POST_SEEK_CHECK_MS,
   SEEK_SETTLE_MS,
   STALL_RECOVERY_DELAY_MS,
@@ -37,6 +40,8 @@ export type SyncSnapshot = {
   /** actual - target. Positive means running ahead. */
   driftMs: number | null;
   corrections: number;
+  /** How late seeks are currently landing, in ms. Learned, not configured. */
+  seekLatencyMs: number;
   loadedTrackIndex: number | null;
   tunedIn: boolean;
   unavailable: boolean;
@@ -54,6 +59,7 @@ export const INITIAL_SNAPSHOT: SyncSnapshot = {
   actualMs: null,
   driftMs: null,
   corrections: 0,
+  seekLatencyMs: 0,
   loadedTrackIndex: null,
   tunedIn: false,
   unavailable: false,
@@ -88,6 +94,44 @@ export function shouldCorrect({
   if (playerState !== 'playing') return false;
   if (msSinceSeek < settleMs) return false;
   return Math.abs(driftMs) > thresholdMs;
+}
+
+/**
+ * Update the running estimate of how late a seek lands.
+ *
+ * The sample is `current - drift`, not `-drift`. After a seek, drift equals
+ * the shortfall between what we aimed for and what actually happened:
+ * `drift = estimate - latency`, so `latency = estimate - drift`. Using
+ * `-drift` would work exactly once — as soon as compensation started landing
+ * on target, drift would read zero and the estimate would decay back to zero
+ * along with it, undoing itself.
+ */
+export function nextSeekLatency(
+  currentMs: number,
+  driftMs: number,
+  smoothing = SEEK_LATENCY_SMOOTHING,
+): number {
+  if (!Number.isFinite(driftMs)) return currentMs;
+  const sample = currentMs - driftMs;
+  const blended = currentMs + (sample - currentMs) * smoothing;
+  if (!Number.isFinite(blended)) return currentMs;
+  return Math.min(Math.max(blended, 0), MAX_SEEK_LATENCY_MS);
+}
+
+/**
+ * Where to actually aim, given how late seeks have been landing.
+ *
+ * Never aims into the last moments of a track: overshooting the end lands
+ * nowhere, and a transition that close is the boundary timer's job anyway.
+ */
+export function compensatedSeekTarget(
+  targetMs: number,
+  latencyMs: number,
+  durationMs: number,
+): number {
+  const aimed = targetMs + Math.max(0, latencyMs);
+  const ceiling = Math.max(0, durationMs - SEEK_COMPENSATION_MARGIN_MS);
+  return Math.max(0, Math.min(aimed, Math.max(ceiling, targetMs)));
 }
 
 export type RoomSyncOptions = {
@@ -136,6 +180,17 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
   let postSeekTimer: ReturnType<typeof setTimeout> | null = null;
   let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   let recoveryAttempts = 0;
+  /** How late seeks have been landing. Learned from what actually happened. */
+  let seekLatencyMs = 0;
+
+  /**
+   * The only way this loop seeks. Compensation applied in one place so no call
+   * site can quietly forget it and reintroduce the lag.
+   */
+  function seekTo(targetMs: number, durationMs: number): void {
+    player.seekTo(compensatedSeekTarget(targetMs, seekLatencyMs, durationMs));
+    lastSeekAtPerf = perfNow();
+  }
 
   function emit(patch: Partial<SyncSnapshot>): void {
     snapshot = { ...snapshot, ...patch };
@@ -153,8 +208,7 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     awaitingFirstPlay = false;
     const current = positionAt(tracks, epochMs, serverNow());
     if (current.kind !== 'playing' || current.trackIndex !== snapshot.loadedTrackIndex) return;
-    player.seekTo(current.offsetMs);
-    lastSeekAtPerf = perfNow();
+    seekTo(current.offsetMs, current.track.durationMs);
     emit({ position: current, targetMs: current.offsetMs });
   });
 
@@ -222,8 +276,7 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
       if (current.kind !== 'playing') return;
 
       if (player.getState() === 'playing') {
-        player.seekTo(current.offsetMs);
-        lastSeekAtPerf = perfNow();
+        seekTo(current.offsetMs, current.track.durationMs);
       } else if (snapshot.tunedIn) {
         // Seeking a track that has not started is dropped, so wait for
         // playback and let the state change above place the needle. A track
@@ -284,12 +337,20 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
       if (snapshot.contended) emit({ contended: false });
     }
 
+    // Learn from this reading before deciding what to do about it, so a
+    // correction issued now already aims with the freshest estimate. Only a
+    // settled reading during real playback says anything about seek latency:
+    // mid-stall or mid-seek it is measuring something else entirely.
+    const settled = perfNow() - lastSeekAtPerf >= SEEK_SETTLE_MS;
+    if (playerState === 'playing' && settled) {
+      seekLatencyMs = nextSeekLatency(seekLatencyMs, driftMs);
+    }
+
     let { corrections } = snapshot;
     if (
       shouldCorrect({ driftMs, playerState, msSinceSeek: perfNow() - lastSeekAtPerf, thresholdMs })
     ) {
-      player.seekTo(targetMs);
-      lastSeekAtPerf = perfNow();
+      seekTo(targetMs, current.track.durationMs);
       corrections += 1;
     }
 
@@ -300,6 +361,7 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
       driftMs: Number.isFinite(driftMs) ? driftMs : null,
       playerState,
       corrections,
+      seekLatencyMs,
     });
   }
 
@@ -334,6 +396,7 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
       postSeekTimer = null;
       recoveryTimer = null;
       recoveryAttempts = 0;
+      // The latency estimate is kept: tuning back in is the same network.
       emit({ tunedIn: false, driftMs: null, actualMs: null, contended: false });
     },
     stop() {

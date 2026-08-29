@@ -66,3 +66,25 @@ export const STALL_RECOVERY_DELAY_MS = 1_000;
  * have needed none.
  */
 export const MAX_STALL_RECOVERY_ATTEMPTS = 3;
+
+/**
+ * Seek latency compensation.
+ *
+ * A seek does not land instantly. Between asking and hearing, the schedule has
+ * moved on, so the player settles behind by however long that took — measured
+ * at roughly 750ms on cellular against 30-60ms on wifi. Correcting does not
+ * help, because each correction re-introduces the same lag; a client can sit
+ * permanently behind while every individual seek is "accurate".
+ *
+ * So aim ahead by however late the last seek actually landed.
+ */
+
+/** How fast the estimate follows a new sample. Low enough that one stalled
+ *  reading cannot throw it. */
+export const SEEK_LATENCY_SMOOTHING = 0.35;
+
+/** Nothing beyond this is a seek landing late; it is something else broken. */
+export const MAX_SEEK_LATENCY_MS = 3_000;
+
+/** Never aim closer than this to the end of a track — that is the boundary's job. */
+export const SEEK_COMPENSATION_MARGIN_MS = 500;
