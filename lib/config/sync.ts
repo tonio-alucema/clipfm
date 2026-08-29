@@ -134,3 +134,17 @@ export const MIN_TRANSITION_LEAD_MS = 250;
  * noticeable than the seek that would fix it.
  */
 export const BOUNDARY_CORRECTION_THRESHOLD_MS = 1_200;
+
+/**
+ * How often to re-position the silent player while nobody is tuned in.
+ *
+ * Loading the right track early is not enough: play() starts it wherever it
+ * happens to sit, which is zero. The listener then hears the opening, and a
+ * seek to the real offset — around two seconds of rebuffering on cellular,
+ * against thirty milliseconds on wifi, which is why this is invisible on a
+ * desktop.
+ *
+ * So the paused player is kept parked at roughly where the room is, and the
+ * tap simply resumes. Cheap: no audio, one message.
+ */
+export const STANDBY_REFRESH_MS = 1_200;
