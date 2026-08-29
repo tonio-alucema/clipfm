@@ -21,7 +21,6 @@ import {
   fetchMyFavorites,
 } from '../favorites/favorites';
 import {
-  deterministicUuid,
   loadListener,
   normalizeNickname,
   saveListener,
@@ -74,14 +73,11 @@ export function useRoom(roomSlug: string) {
   useEffect(() => {
     let cancelled = false;
 
-    // ?as= gives a browser a second identity. Not a product feature — it is
-    // the only way to have more than one listener per browser, since presence
-    // is keyed on an id that lives in localStorage.
-    const actAs = new URLSearchParams(window.location.search).get('as');
-    const loaded: Listener =
-      actAs === null || actAs.length === 0
-        ? loadListener()
-        : { id: deterministicUuid(`debug:${actAs}`), nickname: actAs };
+    // One listener per browser, deliberately. The harnesses under /debug take
+    // an ?as= override so several identities can share a browser for testing;
+    // the room does not, because a query parameter that changes who you are
+    // has no business in a page real people use.
+    const loaded = loadListener();
     setListener(loaded);
 
     void (async () => {
@@ -221,7 +217,7 @@ export function useRoom(roomSlug: string) {
       if (listener === null || nickname.length === 0 || nickname === listener.nickname) return;
       const updated = { ...listener, nickname };
       setListener(updated);
-      if (!raw.startsWith('debug:')) saveListener(updated);
+      saveListener(updated);
       announceNickname(nickname);
     },
     [announceNickname, listener],
