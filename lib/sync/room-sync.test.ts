@@ -207,6 +207,41 @@ describe('createRoomSync', () => {
     expect(calls.seeks).toEqual([30_000]);
   });
 
+  // At a boundary the skip starts the new track itself. If the player is
+  // already playing by the time load() returns, the loop must seek at once
+  // rather than waiting for a state change that has already happened —
+  // otherwise the opening of the new track is audible before it is corrected.
+  it('seeks immediately when a track change is already playing', async () => {
+    const base = fakePlayer();
+    const { calls, setState } = base;
+    const player = {
+      ...base.player,
+      load: (url: string) => {
+        calls.loaded.push(url);
+        setState('playing'); // as skip() does
+        return Promise.resolve('ready' as LoadOutcome);
+      },
+    };
+
+    const sync = createRoomSync({
+      player,
+      tracks: FIXTURE_TRACKS,
+      epochMs: EPOCH,
+      serverNow: () => EPOCH + CRAWFISH.durationMs + 1_200,
+      onChange: () => {},
+      perfNow: () => 0,
+    });
+
+    await sync.tuneIn();
+    sync.stop();
+
+    expect(calls.loaded).toEqual([WILL_HE.url]);
+    expect(calls.seeks).toEqual([1_200]);
+    // No second play(): the skip already started it. tuneIn's own unlocking
+    // play() is the only one.
+    expect(calls.plays).toBe(1);
+  });
+
   it('starts at the top of the playlist at the epoch itself', async () => {
     const { player, calls } = fakePlayer();
     const sync = createRoomSync({
