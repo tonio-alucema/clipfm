@@ -53,6 +53,29 @@ export async function favoriteTrack(request: FavoriteRequest): Promise<FavoriteO
   return outcomeForError(error);
 }
 
+/** Which tracks this listener has already favourited in this room. */
+export async function fetchMyFavorites(
+  roomId: string,
+  listenerId: string,
+): Promise<Set<string>> {
+  const supabase = getSupabase();
+  const mine = new Set<string>();
+  if (supabase === null) return mine;
+
+  const { data, error } = await supabase
+    .from('favorites')
+    .select('track_url')
+    .eq('room_id', roomId)
+    .eq('listener_id', listenerId);
+  if (error !== null || data === null) return mine;
+
+  for (const row of data as Array<Record<string, unknown>>) {
+    const url = row['track_url'];
+    if (typeof url === 'string') mine.add(url);
+  }
+  return mine;
+}
+
 /** How many times each track in this room has been favourited. */
 export async function fetchFavoriteCounts(roomId: string): Promise<Map<string, number>> {
   const supabase = getSupabase();

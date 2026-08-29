@@ -1,0 +1,29 @@
+@import 'tailwindcss';
+
+/*
+ * The room is a dark place you tune into at night. Everything else — the
+ * avatars' gradients, the artwork, a heart — is a light source against it.
+ */
+@theme {
+  --color-room-void: #0a0a0c;
+  --color-room-floor: #121216;
+  --color-room-edge: #1e1e24;
+  --color-room-ink: #f4f4f6;
+  --color-room-dim: #8b8b98;
+  --color-room-faint: #56565f;
+  --color-room-heart: #f0577a;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+html,
+body {
+  background: var(--color-room-void);
+  color: var(--color-room-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The room never scrolls sideways, whatever the artwork does. */
+body {
+  overflow-x: hidden;
+}
