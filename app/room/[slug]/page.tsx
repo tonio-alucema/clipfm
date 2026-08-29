@@ -152,32 +152,41 @@ export default function RoomPage() {
           </section>
 
           <div className="mt-auto pt-8">
-            {/* Tune in needs a real gesture; autoplay is blocked without one. */}
-            {room.tunedIn ? (
+            {/* Tune in needs a real gesture, and mobile only unlocks audio from
+                inside one — so the button stays disabled until there is a
+                player to receive it. Tapping early would spend the tap on
+                nothing and leave the room silent. */}
+            {room.tunedIn && !room.contended ? (
               <div className="flex items-center justify-between gap-4 text-xs text-room-faint">
                 <span>
-                  {room.contended
-                    ? 'playing in another tab'
-                    : room.unavailable
-                      ? 'this track will not play here'
-                      : room.playerState === 'stalled'
-                        ? 'catching up…'
-                        : 'tuned in'}
+                  {room.unavailable
+                    ? 'this track will not play here'
+                    : room.playerState === 'stalled'
+                      ? 'catching up…'
+                      : 'tuned in'}
                 </span>
                 <button type="button" onClick={room.tuneOut} className="underline">
                   tune out
                 </button>
               </div>
             ) : (
-              <motion.button
-                type="button"
-                onClick={room.tuneIn}
-                whileTap={{ scale: 0.97 }}
-                transition={SPRING.arrive}
-                className="w-full rounded-full bg-room-ink py-3.5 text-sm font-medium text-room-void"
-              >
-                Tune in
-              </motion.button>
+              <>
+                <motion.button
+                  type="button"
+                  onClick={room.tuneIn}
+                  disabled={!room.ready}
+                  whileTap={{ scale: room.ready ? 0.97 : 1 }}
+                  transition={SPRING.arrive}
+                  className="w-full rounded-full bg-room-ink py-3.5 text-sm font-medium text-room-void disabled:opacity-40"
+                >
+                  {!room.ready ? 'Getting ready…' : room.contended ? 'Try again' : 'Tune in'}
+                </motion.button>
+                {room.contended && (
+                  <p className="mt-2 text-center text-xs text-room-faint">
+                    Playback would not start. If the room is open in another tab, close it.
+                  </p>
+                )}
+              </>
             )}
 
             <div className="mt-4 text-center text-xs text-room-faint">

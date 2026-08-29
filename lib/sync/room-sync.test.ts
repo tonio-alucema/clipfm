@@ -4,6 +4,7 @@ import { FIXTURE_TRACKS } from '../fixtures/tracks';
 import { positionAt } from '../schedule';
 import {
   DRIFT_CHECK_INTERVAL_MS,
+  DRIFT_CORRECTION_THRESHOLD_MS,
   MAX_SEEK_LATENCY_MS,
   MAX_STALL_RECOVERY_ATTEMPTS,
   MAX_TRANSITION_LEAD_MS,
@@ -23,7 +24,11 @@ const WILL_HE = FIXTURE_TRACKS[1]!;
 const EPOCH = 1_700_000_000_000;
 
 describe('shouldCorrect', () => {
-  const base = { driftMs: 5_000, playerState: 'playing' as PlayerState, msSinceSeek: 60_000 };
+  const base = {
+    driftMs: DRIFT_CORRECTION_THRESHOLD_MS * 2,
+    playerState: 'playing' as PlayerState,
+    msSinceSeek: 60_000,
+  };
 
   it('corrects a large drift in either direction', () => {
     expect(shouldCorrect(base)).toBe(true);
@@ -35,9 +40,12 @@ describe('shouldCorrect', () => {
     expect(shouldCorrect({ ...base, driftMs: -900 })).toBe(false);
   });
 
+  // Reads the tunable rather than restating it: the threshold is a product
+  // decision that has already moved once, and a test hardcoding it fails for
+  // the wrong reason when it moves again.
   it('does not correct exactly at the threshold', () => {
-    expect(shouldCorrect({ ...base, driftMs: 1_500 })).toBe(false);
-    expect(shouldCorrect({ ...base, driftMs: 1_501 })).toBe(true);
+    expect(shouldCorrect({ ...base, driftMs: DRIFT_CORRECTION_THRESHOLD_MS })).toBe(false);
+    expect(shouldCorrect({ ...base, driftMs: DRIFT_CORRECTION_THRESHOLD_MS + 1 })).toBe(true);
   });
 
   // A reading taken while buffering says nothing about drift, and seeking on

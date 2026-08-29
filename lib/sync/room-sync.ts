@@ -459,6 +459,11 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
   return {
     tuneIn() {
       if (stopped) return Promise.resolve();
+      // A fresh attempt gets a fresh budget: whatever stopped playback last
+      // time may well be gone, and a listener tapping again is asking us to
+      // try properly rather than remember why we gave up.
+      recoveryAttempts = 0;
+      if (snapshot.contended) emit({ contended: false });
 
       // Synchronous, before any await. Mobile browsers only unlock playback
       // from inside the gesture that asked for it, and an awaited load in
