@@ -76,6 +76,8 @@ export async function createSoundCloudPlayer(
   let sounds: WidgetSound[] = [];
   let indexByUrl = new Map<string, number>();
   let currentIndex: number | null = null;
+  /** What the widget actually has, refreshed whenever it might have changed. */
+  let loadedUrl: string | null = null;
 
   const listeners = new Set<(next: PlayerState) => void>();
 
@@ -100,6 +102,8 @@ export async function createSoundCloudPlayer(
 
   on(EV.play, () => {
     lastProgressAt = performance.now();
+    // A set player advances by itself, and 'play' is when that becomes true.
+    refreshLoadedSound();
   });
 
   on(EV.pause, () => {
@@ -108,8 +112,9 @@ export async function createSoundCloudPlayer(
     setState(wantsToPlay ? 'stalled' : 'ready');
   });
 
-  // Nothing advances on FINISH. The schedule decides what plays.
-  on(EV.finish, () => {});
+  // Nothing advances on FINISH — the schedule decides what plays. But the
+  // widget may advance itself regardless, so find out what it did.
+  on(EV.finish, () => refreshLoadedSound());
   on(EV.seek, () => {});
   on(EV.error, () => setState('unavailable'));
 
@@ -198,8 +203,17 @@ export async function createSoundCloudPlayer(
 
   // Establish where the widget already is, so a join to the current track does
   // not skip needlessly.
+  function refreshLoadedSound(): void {
+    void currentPermalink().then((url) => {
+      if (destroyed || url === null) return;
+      loadedUrl = url;
+      currentIndex = indexByUrl.get(normalizeTrackUrl(url)) ?? currentIndex;
+    });
+  }
+
   const startingUrl = await currentPermalink();
   if (startingUrl !== null) {
+    loadedUrl = startingUrl;
     currentIndex = indexByUrl.get(normalizeTrackUrl(startingUrl)) ?? null;
   }
 
@@ -229,6 +243,7 @@ export async function createSoundCloudPlayer(
     setState('loading');
     widget.skip(index);
     currentIndex = index;
+    loadedUrl = sounds[index]?.url ?? trackUrl;
     // skip() starts the new track on its own. Record that as intent, so the
     // progress events it produces are recognised as playing rather than as an
     // unrequested pause to recover from.
@@ -286,6 +301,7 @@ export async function createSoundCloudPlayer(
     },
     getPosition,
     getState: () => state,
+    getLoadedUrl: () => loadedUrl,
     getSounds: () => sounds,
     getLoadedSound: () => (currentIndex === null ? null : (sounds[currentIndex] ?? null)),
     onStateChange(listener) {

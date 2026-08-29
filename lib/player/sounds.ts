@@ -6,6 +6,8 @@
  * parsing can be tested without a browser.
  */
 
+export { normalizeTrackUrl } from '../track-url';
+
 export type WidgetSound = {
   index: number;
   url: string;
@@ -16,19 +18,8 @@ export type WidgetSound = {
   embeddable: boolean;
 };
 
-/**
- * Permalinks come back from the widget in a slightly different shape than we
- * store them. Compare on a normalised form rather than raw equality.
- */
-export function normalizeTrackUrl(url: string): string {
-  return url
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, '')
-    .replace(/^www\./, '')
-    .replace(/[?#].*$/, '')
-    .replace(/\/+$/, '');
-}
+
+import { normalizeTrackUrl } from '../track-url';
 
 function readString(source: Record<string, unknown>, key: string): string | null {
   const value = source[key];

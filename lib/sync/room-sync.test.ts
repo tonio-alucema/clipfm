@@ -155,11 +155,16 @@ function fakePlayer(overrides: Partial<RoomPlayer> = {}) {
     for (const listener of listeners) listener(next);
   };
 
+  // Mirrors the real adapter: whatever was last loaded is what it reports.
+  let loadedUrl: string | null = null;
+
   const player: RoomPlayer = {
     load: (url) => {
       calls.loaded.push(url);
+      loadedUrl = url;
       return Promise.resolve('ready' as LoadOutcome);
     },
+    getLoadedUrl: () => loadedUrl,
     // Mirrors the real widget: playback begins, and the state change is what
     // tells the sync loop it is finally safe to seek.
     play: () => {
@@ -473,6 +478,50 @@ describe('createRoomSync', () => {
 
       expect(calls.loaded).toEqual([CRAWFISH.url, WILL_HE.url]);
       expect(calls.seeks.length).toBe(seeksAfterJoining);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * A set player advances by itself when a track ends, so the loop can find
+   * itself on a song the schedule never named — observed live, playing a track
+   * that had been added to the set after the schedule was frozen. Seeking
+   * cannot fix being on the wrong song; it has to go and fetch the right one.
+   */
+  it('recovers when the player wanders onto a track nobody asked for', async () => {
+    vi.useFakeTimers();
+    try {
+      let perf = 0;
+      const base = fakePlayer();
+      const { calls } = base;
+      let wandered = false;
+      const player = {
+        ...base.player,
+        // Reports something entirely outside the schedule, as a set advance does.
+        getLoadedUrl: () => (wandered ? 'https://soundcloud.com/someone/test-pilot' : base.player.getLoadedUrl()),
+      };
+
+      const sync = createRoomSync({
+        player,
+        tracks: FIXTURE_TRACKS,
+        epochMs: EPOCH,
+        serverNow: () => EPOCH + 30_000,
+        onChange: () => {},
+        perfNow: () => perf,
+      });
+
+      await sync.tuneIn();
+      const loadsAfterJoining = calls.loaded.length;
+
+      wandered = true;
+      perf = 100_000;
+      await vi.advanceTimersByTimeAsync(DRIFT_CHECK_INTERVAL_MS + 50);
+      sync.stop();
+
+      // It went back for the track the schedule actually names.
+      expect(calls.loaded.length).toBeGreaterThan(loadsAfterJoining);
+      expect(calls.loaded.at(-1)).toBe(CRAWFISH.url);
     } finally {
       vi.useRealTimers();
     }

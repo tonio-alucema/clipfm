@@ -22,6 +22,7 @@ import {
   MAX_STALL_RECOVERY_ATTEMPTS,
   MAX_TIMER_MS,
   MAX_TRANSITION_LEAD_MS,
+  MIN_TRANSITION_LEAD_MS,
   SEEK_COMPENSATION_MARGIN_MS,
   SEEK_LATENCY_SMOOTHING,
   POST_SEEK_CHECK_MS,
@@ -30,6 +31,7 @@ import {
 } from '../config/sync';
 import type { PlayerState, RoomPlayer } from '../player/types';
 import { msUntilBoundary, positionAt, type SchedulePosition, type Track } from '../schedule';
+import { normalizeTrackUrl } from '../track-url';
 
 export type SyncSnapshot = {
   position: SchedulePosition | null;
@@ -63,7 +65,7 @@ export const INITIAL_SNAPSHOT: SyncSnapshot = {
   driftMs: null,
   corrections: 0,
   seekLatencyMs: 0,
-  transitionLeadMs: 0,
+  transitionLeadMs: MIN_TRANSITION_LEAD_MS,
   loadedTrackIndex: null,
   tunedIn: false,
   unavailable: false,
@@ -151,7 +153,10 @@ export function nextTransitionLead(
   if (!Number.isFinite(observedMs) || observedMs < 0) return currentMs;
   const blended = currentMs + (observedMs - currentMs) * smoothing;
   if (!Number.isFinite(blended)) return currentMs;
-  return Math.min(Math.max(blended, 0), MAX_TRANSITION_LEAD_MS);
+  // Floored, not just capped. A lead of zero hands over exactly as the
+  // outgoing track ends, which is the one moment guaranteed to race the set
+  // player's own advance.
+  return Math.min(Math.max(blended, MIN_TRANSITION_LEAD_MS), MAX_TRANSITION_LEAD_MS);
 }
 
 export type RoomSyncOptions = {
@@ -209,7 +214,7 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
   /** How late seeks have been landing. Learned from what actually happened. */
   let seekLatencyMs = 0;
   /** How long a track change takes, so the next one can be started that early. */
-  let transitionLeadMs = 0;
+  let transitionLeadMs = MIN_TRANSITION_LEAD_MS;
 
   /**
    * The only way this loop seeks. Compensation applied in one place so no call
@@ -269,7 +274,10 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
 
     // Start early, so the new track begins at zero when the schedule says it
     // should rather than however long a transition takes afterwards.
-    const lead = Math.min(transitionLeadMs, MAX_TRANSITION_LEAD_MS);
+    const lead = Math.min(
+      Math.max(transitionLeadMs, MIN_TRANSITION_LEAD_MS),
+      MAX_TRANSITION_LEAD_MS,
+    );
     const delay = Math.min(Math.max(remaining - lead, 0), MAX_TIMER_MS);
     boundaryTimer = setTimeout(() => {
       void transition();
@@ -382,6 +390,17 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     const current = positionAt(tracks, epochMs, serverNow());
     if (current.kind === 'empty') return;
     if (current.trackIndex !== snapshot.loadedTrackIndex) {
+      void transition();
+      return;
+    }
+
+    // The player can end up on a track nobody asked for — a set advances by
+    // itself when one ends. No amount of seeking fixes being on the wrong
+    // song, so go and fetch the right one. Forgetting what is loaded makes the
+    // next transition treat this as an arrival, which is what it is.
+    const loadedUrl = player.getLoadedUrl();
+    if (loadedUrl !== null && normalizeTrackUrl(loadedUrl) !== normalizeTrackUrl(current.track.url)) {
+      emit({ loadedTrackIndex: null });
       void transition();
       return;
     }

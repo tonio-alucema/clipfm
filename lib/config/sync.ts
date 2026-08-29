@@ -106,3 +106,17 @@ export const SEEK_COMPENSATION_MARGIN_MS = 500;
  * exchange for hearing the next one's actual opening, in time, without a jump.
  */
 export const MAX_TRANSITION_LEAD_MS = 4_000;
+
+/**
+ * Never hand over later than this before the boundary, even before anything
+ * has been learned.
+ *
+ * A set player advances by itself when a track ends. Handing over *at* the
+ * boundary races that: our skip and the widget's own advance both fire, and we
+ * land one track past the one we asked for — playing something the schedule
+ * never mentioned while the loop seeks at it once a second trying to correct.
+ *
+ * Leaving before the outgoing track can end avoids the race entirely, because
+ * a track we have already left never reaches its end.
+ */
+export const MIN_TRANSITION_LEAD_MS = 900;
