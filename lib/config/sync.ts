@@ -119,4 +119,14 @@ export const MAX_TRANSITION_LEAD_MS = 4_000;
  * Leaving before the outgoing track can end avoids the race entirely, because
  * a track we have already left never reaches its end.
  */
-export const MIN_TRANSITION_LEAD_MS = 900;
+export const MIN_TRANSITION_LEAD_MS = 250;
+
+/**
+ * How far off a handover may land before it is worth correcting.
+ *
+ * Looser than a join, deliberately. A correction here is a second audible
+ * interruption moments after the first, and the lead is still converging —
+ * being a third of a second out is well inside the sync goal and much less
+ * noticeable than the seek that would fix it.
+ */
+export const BOUNDARY_CORRECTION_THRESHOLD_MS = 400;

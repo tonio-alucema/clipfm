@@ -16,6 +16,7 @@
 
 import {
   DRIFT_CHECK_INTERVAL_MS,
+  BOUNDARY_CORRECTION_THRESHOLD_MS,
   DRIFT_CORRECTION_THRESHOLD_MS,
   JOIN_CORRECTION_THRESHOLD_MS,
   MAX_SEEK_LATENCY_MS,
@@ -141,9 +142,14 @@ export function compensatedSeekTarget(
 }
 
 /**
- * How early to start the next transition, learned from how long the last one
- * took. Same smoothing as seek latency, and bounded: anything longer than the
- * cap is a stall, not a transition.
+ * How early to start the next transition.
+ *
+ * Learned the same way as seek latency, and for the same reason: measured from
+ * what actually happened rather than from a proxy. Timing the code around the
+ * skip measures the wrong thing — it includes confirmation work the listener
+ * never hears, so it over-estimates and hands over early. The drift observed
+ * after a handover is the honest number: positive means the new track started
+ * ahead of the schedule, so lead by that much less next time.
  */
 export function nextTransitionLead(
   currentMs: number,
@@ -306,7 +312,6 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     busy = true;
     const changedTrack = snapshot.loadedTrackIndex !== position.trackIndex;
     const isBoundary = changedTrack && !isJoin;
-    const startedAtPerf = perfNow();
     try {
       if (changedTrack) {
         const outcome = await player.load(position.track.url);
@@ -320,12 +325,7 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
         });
         if (outcome === 'unavailable') return;
 
-        // How long that actually took, so the next one is started that early.
-        // Only a real handover measures this; a join includes work a boundary
-        // does not, and would inflate the lead.
-        if (isBoundary) {
-          transitionLeadMs = nextTransitionLead(transitionLeadMs, perfNow() - startedAtPerf);
-        }
+
       }
 
       // Recompute: the load took real time, and the schedule moved on.
@@ -362,7 +362,10 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
       // masks a correction.
       if (postSeekTimer !== null) clearTimeout(postSeekTimer);
       postSeekTimer = setTimeout(() => {
-        void checkDrift(JOIN_CORRECTION_THRESHOLD_MS);
+        void checkDrift(
+          isBoundary ? BOUNDARY_CORRECTION_THRESHOLD_MS : JOIN_CORRECTION_THRESHOLD_MS,
+          isBoundary,
+        );
       }, POST_SEEK_CHECK_MS);
     } finally {
       busy = false;
@@ -370,7 +373,10 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     }
   }
 
-  async function checkDrift(thresholdMs = DRIFT_CORRECTION_THRESHOLD_MS): Promise<void> {
+  async function checkDrift(
+    thresholdMs = DRIFT_CORRECTION_THRESHOLD_MS,
+    learnLead = false,
+  ): Promise<void> {
     if (stopped || busy || !snapshot.tunedIn) return;
 
     // A stall is not a drift problem and must not be treated as one. The
@@ -424,6 +430,11 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     const settled = perfNow() - lastSeekAtPerf >= SEEK_SETTLE_MS;
     if (playerState === 'playing' && settled) {
       seekLatencyMs = nextSeekLatency(seekLatencyMs, driftMs);
+    }
+    // After a handover, the drift is how far the lead overshot. Same
+    // self-correcting shape: aim for `lead - drift`.
+    if (learnLead && playerState === 'playing') {
+      transitionLeadMs = nextTransitionLead(transitionLeadMs, transitionLeadMs - driftMs);
     }
 
     let { corrections } = snapshot;

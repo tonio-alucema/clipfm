@@ -7,6 +7,7 @@ import {
   MAX_SEEK_LATENCY_MS,
   MAX_STALL_RECOVERY_ATTEMPTS,
   MAX_TRANSITION_LEAD_MS,
+  MIN_TRANSITION_LEAD_MS,
   SEEK_COMPENSATION_MARGIN_MS,
 } from '../config/sync';
 import {
@@ -100,6 +101,26 @@ describe('nextTransitionLead', () => {
     let lead = 0;
     for (let i = 0; i < 25; i++) lead = nextTransitionLead(lead, 900);
     expect(lead).toBeCloseTo(900, 0);
+  });
+
+  // The same feedback shape as seek latency: drift after a handover is how far
+  // the lead overshot, so the next observation is `lead - drift`. Leading too
+  // much starts the new track ahead of the schedule, which then has to be
+  // seeked backwards — an audible pause seconds after the handover.
+  it('settles where handovers land on time', () => {
+    const TRUE_LEAD = 320;
+    let lead = 1_500;
+    for (let i = 0; i < 30; i++) {
+      const drift = lead - TRUE_LEAD; // positive: started early
+      lead = nextTransitionLead(lead, lead - drift);
+    }
+    expect(lead).toBeCloseTo(TRUE_LEAD, 0);
+  });
+
+  it('never drops to zero, which would race the set player\'s own advance', () => {
+    let lead = 500;
+    for (let i = 0; i < 30; i++) lead = nextTransitionLead(lead, 0);
+    expect(lead).toBe(MIN_TRANSITION_LEAD_MS);
   });
 
   it('is capped — anything longer than that is a stall, not a handover', () => {
