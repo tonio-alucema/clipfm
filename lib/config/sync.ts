@@ -88,3 +88,21 @@ export const MAX_SEEK_LATENCY_MS = 3_000;
 
 /** Never aim closer than this to the end of a track — that is the boundary's job. */
 export const SEEK_COMPENSATION_MARGIN_MS = 500;
+
+/**
+ * Transitions are started early.
+ *
+ * A track change costs real time: the widget cuts the old track, loads the new
+ * one, and starts it at zero. Doing that *at* the boundary means the new track
+ * begins late and then has to be seeked forward to catch up — a second
+ * interruption, and a second of the wrong part of the song in between.
+ *
+ * So the transition is armed early by however long one actually takes. Done
+ * right, the new track begins at 0:00 at the moment the schedule says it
+ * should, and no seek is needed at all.
+ *
+ * The cost is the tail: the previous track is cut short by the lead. That is a
+ * deliberate trade — a fraction of a second off the end of one song, in
+ * exchange for hearing the next one's actual opening, in time, without a jump.
+ */
+export const MAX_TRANSITION_LEAD_MS = 4_000;

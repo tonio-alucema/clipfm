@@ -1,16 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { LoadOutcome, PlayerState, RoomPlayer } from '../player/types';
 import { FIXTURE_TRACKS } from '../fixtures/tracks';
+import { positionAt } from '../schedule';
 import {
   DRIFT_CHECK_INTERVAL_MS,
   MAX_SEEK_LATENCY_MS,
   MAX_STALL_RECOVERY_ATTEMPTS,
+  MAX_TRANSITION_LEAD_MS,
   SEEK_COMPENSATION_MARGIN_MS,
 } from '../config/sync';
 import {
   compensatedSeekTarget,
   createRoomSync,
   nextSeekLatency,
+  nextTransitionLead,
   shouldCorrect,
 } from './room-sync';
 
@@ -89,6 +92,23 @@ describe('nextSeekLatency', () => {
 
   it('ignores a missing reading rather than treating it as zero drift', () => {
     expect(nextSeekLatency(750, Number.NaN)).toBe(750);
+  });
+});
+
+describe('nextTransitionLead', () => {
+  it('follows how long transitions are actually taking', () => {
+    let lead = 0;
+    for (let i = 0; i < 25; i++) lead = nextTransitionLead(lead, 900);
+    expect(lead).toBeCloseTo(900, 0);
+  });
+
+  it('is capped — anything longer than that is a stall, not a handover', () => {
+    expect(nextTransitionLead(0, 60_000)).toBe(MAX_TRANSITION_LEAD_MS);
+  });
+
+  it('ignores impossible observations', () => {
+    expect(nextTransitionLead(900, -50)).toBe(900);
+    expect(nextTransitionLead(900, Number.NaN)).toBe(900);
   });
 });
 
@@ -402,6 +422,57 @@ describe('createRoomSync', () => {
       expect(snapshot.seekLatencyMs).toBeGreaterThan(0);
       // The correction aims past the target by exactly what it just learned.
       expect(calls.seeks.at(-1)).toBe(30_000 + snapshot.seekLatencyMs);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * The seam. A boundary hands over to a track that should begin at zero, so
+   * seeking into it is both unnecessary and audible — it was the second of
+   * three pauses reported at a track change. A join is different and must
+   * still seek; the tests above cover that.
+   */
+  it('hands over at a boundary without seeking', async () => {
+    vi.useFakeTimers();
+    try {
+      let perf = 0;
+      let now = EPOCH + 30_000; // mid first track
+      const base = fakePlayer();
+      const { calls } = base;
+      // A player that is where the schedule says it should be — i.e. the lead
+      // was right. Otherwise the post-transition check correctly fires a
+      // correction and we would be testing desync, not the handover.
+      const player = {
+        ...base.player,
+        getPosition: () => {
+          const at = positionAt(FIXTURE_TRACKS, EPOCH, now);
+          return Promise.resolve(at.kind === 'playing' ? at.offsetMs : 0);
+        },
+      };
+
+      const sync = createRoomSync({
+        player,
+        tracks: FIXTURE_TRACKS,
+        epochMs: EPOCH,
+        serverNow: () => now,
+        onChange: () => {},
+        perfNow: () => perf,
+      });
+
+      await sync.tuneIn();
+      expect(calls.loaded).toEqual([CRAWFISH.url]);
+      const seeksAfterJoining = calls.seeks.length;
+      expect(seeksAfterJoining).toBeGreaterThan(0); // a join does seek
+
+      // Cross into the next track.
+      now = EPOCH + CRAWFISH.durationMs + 400;
+      perf = 100_000;
+      await vi.advanceTimersByTimeAsync(DRIFT_CHECK_INTERVAL_MS + 50);
+      sync.stop();
+
+      expect(calls.loaded).toEqual([CRAWFISH.url, WILL_HE.url]);
+      expect(calls.seeks.length).toBe(seeksAfterJoining);
     } finally {
       vi.useRealTimers();
     }

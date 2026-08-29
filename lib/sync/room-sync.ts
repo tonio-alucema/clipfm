@@ -21,6 +21,7 @@ import {
   MAX_SEEK_LATENCY_MS,
   MAX_STALL_RECOVERY_ATTEMPTS,
   MAX_TIMER_MS,
+  MAX_TRANSITION_LEAD_MS,
   SEEK_COMPENSATION_MARGIN_MS,
   SEEK_LATENCY_SMOOTHING,
   POST_SEEK_CHECK_MS,
@@ -42,6 +43,8 @@ export type SyncSnapshot = {
   corrections: number;
   /** How late seeks are currently landing, in ms. Learned, not configured. */
   seekLatencyMs: number;
+  /** How early transitions are being started, in ms. Also learned. */
+  transitionLeadMs: number;
   loadedTrackIndex: number | null;
   tunedIn: boolean;
   unavailable: boolean;
@@ -60,6 +63,7 @@ export const INITIAL_SNAPSHOT: SyncSnapshot = {
   driftMs: null,
   corrections: 0,
   seekLatencyMs: 0,
+  transitionLeadMs: 0,
   loadedTrackIndex: null,
   tunedIn: false,
   unavailable: false,
@@ -134,6 +138,22 @@ export function compensatedSeekTarget(
   return Math.max(0, Math.min(aimed, Math.max(ceiling, targetMs)));
 }
 
+/**
+ * How early to start the next transition, learned from how long the last one
+ * took. Same smoothing as seek latency, and bounded: anything longer than the
+ * cap is a stall, not a transition.
+ */
+export function nextTransitionLead(
+  currentMs: number,
+  observedMs: number,
+  smoothing = SEEK_LATENCY_SMOOTHING,
+): number {
+  if (!Number.isFinite(observedMs) || observedMs < 0) return currentMs;
+  const blended = currentMs + (observedMs - currentMs) * smoothing;
+  if (!Number.isFinite(blended)) return currentMs;
+  return Math.min(Math.max(blended, 0), MAX_TRANSITION_LEAD_MS);
+}
+
 export type RoomSyncOptions = {
   player: RoomPlayer;
   tracks: readonly Track[];
@@ -175,6 +195,12 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
    * target then rather than reusing a value that has since gone stale.
    */
   let awaitingFirstPlay = false;
+  /**
+   * Whether the pending first playback should be seeked into place. True when
+   * joining mid-track; false after a track change, where the new track
+   * starting at zero is exactly where the schedule wants it.
+   */
+  let seekWhenPlaybackStarts = true;
   let driftTimer: ReturnType<typeof setInterval> | null = null;
   let boundaryTimer: ReturnType<typeof setTimeout> | null = null;
   let postSeekTimer: ReturnType<typeof setTimeout> | null = null;
@@ -182,6 +208,8 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
   let recoveryAttempts = 0;
   /** How late seeks have been landing. Learned from what actually happened. */
   let seekLatencyMs = 0;
+  /** How long a track change takes, so the next one can be started that early. */
+  let transitionLeadMs = 0;
 
   /**
    * The only way this loop seeks. Compensation applied in one place so no call
@@ -208,7 +236,7 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     awaitingFirstPlay = false;
     const current = positionAt(tracks, epochMs, serverNow());
     if (current.kind !== 'playing' || current.trackIndex !== snapshot.loadedTrackIndex) return;
-    seekTo(current.offsetMs, current.track.durationMs);
+    if (seekWhenPlaybackStarts) seekTo(current.offsetMs, current.track.durationMs);
     emit({ position: current, targetMs: current.offsetMs });
   });
 
@@ -239,7 +267,10 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     const remaining = msUntilBoundary(tracks, epochMs, serverNow());
     if (remaining === null) return;
 
-    const delay = Math.min(Math.max(remaining, 0), MAX_TIMER_MS);
+    // Start early, so the new track begins at zero when the schedule says it
+    // should rather than however long a transition takes afterwards.
+    const lead = Math.min(transitionLeadMs, MAX_TRANSITION_LEAD_MS);
+    const delay = Math.min(Math.max(remaining - lead, 0), MAX_TIMER_MS);
     boundaryTimer = setTimeout(() => {
       void transition();
     }, delay);
@@ -249,7 +280,16 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
   async function transition(): Promise<void> {
     if (stopped || busy) return;
 
-    const position = positionAt(tracks, epochMs, serverNow());
+    // Joining is not the same as crossing a boundary, and the difference
+    // decides everything below. A joiner arrives mid-song and must be placed
+    // into it; a boundary hands over to a track that should begin at zero.
+    const isJoin = snapshot.loadedTrackIndex === null;
+
+    // The boundary timer fires early, so the schedule may still name the
+    // outgoing track. Look ahead by the lead to find the one about to start.
+    // A join takes no lookahead: it wants where the room is now.
+    const lookaheadMs = isJoin ? 0 : transitionLeadMs;
+    const position = positionAt(tracks, epochMs, serverNow() + lookaheadMs);
     if (position.kind === 'empty') {
       emit({ position });
       return;
@@ -257,6 +297,8 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
 
     busy = true;
     const changedTrack = snapshot.loadedTrackIndex !== position.trackIndex;
+    const isBoundary = changedTrack && !isJoin;
+    const startedAtPerf = perfNow();
     try {
       if (changedTrack) {
         const outcome = await player.load(position.track.url);
@@ -269,24 +311,43 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
           unavailable: outcome === 'unavailable',
         });
         if (outcome === 'unavailable') return;
+
+        // How long that actually took, so the next one is started that early.
+        // Only a real handover measures this; a join includes work a boundary
+        // does not, and would inflate the lead.
+        if (isBoundary) {
+          transitionLeadMs = nextTransitionLead(transitionLeadMs, perfNow() - startedAtPerf);
+        }
       }
 
       // Recompute: the load took real time, and the schedule moved on.
       const current = positionAt(tracks, epochMs, serverNow());
       if (current.kind !== 'playing') return;
 
-      if (player.getState() === 'playing') {
+      if (isBoundary) {
+        // The skip started the new track at zero, which — if the lead was
+        // right — is exactly where the schedule wants it. Seeking here is the
+        // second interruption and a second of the wrong part of the song. The
+        // post-transition check below corrects only if the lead was wrong.
+        seekWhenPlaybackStarts = false;
+        if (snapshot.tunedIn && player.getState() !== 'playing') awaitingFirstPlay = true;
+      } else if (player.getState() === 'playing') {
         seekTo(current.offsetMs, current.track.durationMs);
       } else if (snapshot.tunedIn) {
         // Seeking a track that has not started is dropped, so wait for
-        // playback and let the state change above place the needle. A track
-        // change already started itself; calling play() on top of that only
-        // produces pause/play churn.
+        // playback and let the state change above place the needle.
+        seekWhenPlaybackStarts = true;
         awaitingFirstPlay = true;
+        // A track change starts itself; calling play() on top produces churn.
         if (!changedTrack) player.play();
       }
 
-      emit({ position: current, targetMs: current.offsetMs, unavailable: false });
+      emit({
+        position: current,
+        targetMs: current.offsetMs,
+        unavailable: false,
+        transitionLeadMs,
+      });
 
       // The seek above lands late by however long loading and seeking took.
       // Check once more with a tight threshold, while the transition still
