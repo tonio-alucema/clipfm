@@ -20,6 +20,7 @@ import { HeartBurst } from '@/components/heart-burst';
 import { widgetIframeSrc } from '@/lib/player/widget-api';
 import { DURATION, EASE, SPRING, jitter } from '@/lib/motion';
 import { useRoom } from '@/lib/room/use-room';
+import { DEFAULT_ROOM_SLUG } from '@/lib/rooms';
 
 function clock(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));
@@ -28,7 +29,7 @@ function clock(ms: number): string {
 
 export default function RoomPage() {
   const params = useParams<{ slug: string }>();
-  const room = useRoom(params.slug ?? 'main');
+  const room = useRoom(params.slug ?? DEFAULT_ROOM_SLUG);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState('');
 
@@ -54,7 +55,8 @@ export default function RoomPage() {
 
       {room.phase === 'empty' && (
         <p className="text-sm text-room-dim">
-          Nothing is scheduled here yet. The room is real, but silent.
+          Nothing is playing here. Either this room has no schedule yet, or there is no
+          room by this name.
         </p>
       )}
 
