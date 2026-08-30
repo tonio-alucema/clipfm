@@ -29,6 +29,7 @@ import {
   type Listener,
 } from '@/lib/identity';
 import { jitter } from '@/lib/motion';
+import { DEFAULT_ROOM_SLUG } from '@/lib/rooms';
 import { useRoomChannel } from '@/lib/presence/use-room-channel';
 import { positionAt, type Track } from '@/lib/schedule';
 import { measureServerClock, serverNowFrom, type ClockOffset } from '@/lib/time/server-clock';
@@ -39,7 +40,7 @@ export default function RoomHarness() {
   const clockRef = useRef<ClockOffset | null>(null);
   const [clockReady, setClockReady] = useState(false);
   const [listener, setListener] = useState<Listener | null>(null);
-  const [roomSlug, setRoomSlug] = useState('main');
+  const [roomSlug, setRoomSlug] = useState(DEFAULT_ROOM_SLUG);
   const [draftNickname, setDraftNickname] = useState('');
   const [schedule, setSchedule] = useState<LiveSchedule | null>(null);
   const [track, setTrack] = useState<Track | null>(null);
@@ -55,7 +56,7 @@ export default function RoomHarness() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const slug = params.get('room') ?? 'main';
+    const slug = params.get('room') ?? DEFAULT_ROOM_SLUG;
     setRoomSlug(slug);
 
     const actAs = params.get('as');

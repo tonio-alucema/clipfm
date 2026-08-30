@@ -22,6 +22,7 @@ import { fetchActiveSchedule } from '@/lib/db/schedules';
 import { FIXTURE_EPOCH_MS, FIXTURE_SET_URL, FIXTURE_TRACKS } from '@/lib/fixtures/tracks';
 import { createSoundCloudPlayer, type SoundCloudPlayer } from '@/lib/player/soundcloud';
 import { widgetIframeSrc } from '@/lib/player/widget-api';
+import { DEFAULT_ROOM_SLUG } from '@/lib/rooms';
 import { positionAt, totalDurationMs, type Track } from '@/lib/schedule';
 import { createRoomSync, INITIAL_SNAPSHOT, type SyncSnapshot } from '@/lib/sync/room-sync';
 import { measureServerClock, serverNowFrom, type ClockOffset } from '@/lib/time/server-clock';
@@ -77,7 +78,9 @@ export default function SyncHarness() {
       setClock(offset);
 
       const params = new URLSearchParams(window.location.search);
-      const live = await fetchActiveSchedule(params.get('room') ?? 'main').catch(() => null);
+      const live = await fetchActiveSchedule(params.get('room') ?? DEFAULT_ROOM_SLUG).catch(
+        () => null,
+      );
       if (cancelled) return;
 
       const base: ResolvedSchedule =
