@@ -18,6 +18,22 @@ export const STALL_AFTER_MS = 2_000;
 export const STALL_POLL_MS = 500;
 
 /**
+ * How long the set manifest must stop growing before it is believed.
+ *
+ * The widget loads a set's tracks in pages, and the pause between pages is
+ * easily longer than a couple of polls — so "the count did not change twice in
+ * a row" accepted 20 of 25 tracks and lost the rest. A track missing from the
+ * manifest cannot be found by URL, so it looks unplayable to the room and
+ * invisible to the seed tool.
+ *
+ * Patience is cheap here and the alternative is silent data loss.
+ */
+export const MANIFEST_SETTLE_MS = 2_500;
+
+/** How often to re-read while waiting for it to settle. */
+export const MANIFEST_POLL_MS = 400;
+
+/**
  * Seed-time playability verification.
  *
  * Metadata does not predict playability. A track can report `streamable: true`,

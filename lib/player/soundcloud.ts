@@ -17,6 +17,8 @@
 
 import {
   LOAD_TIMEOUT_MS,
+  MANIFEST_POLL_MS,
+  MANIFEST_SETTLE_MS,
   STALL_AFTER_MS,
   STALL_POLL_MS,
   VERIFY_ADVANCE_MS,
@@ -170,19 +172,23 @@ export async function createSoundCloudPlayer(
   async function ensureSounds(): Promise<void> {
     const deadline = performance.now() + LOAD_TIMEOUT_MS;
     let previousCount = -1;
-    let stableReads = 0;
+    let lastChangeAt = performance.now();
+
     while (!destroyed && performance.now() < deadline) {
       await readSounds();
-      // The manifest fills in lazily, so a non-empty read is not a complete
-      // one. Wait for the count to stop growing.
-      if (sounds.length > 0 && sounds.length === previousCount) {
-        stableReads += 1;
-        if (stableReads >= 2) return;
-      } else {
-        stableReads = 0;
+
+      if (sounds.length !== previousCount) {
         previousCount = sounds.length;
+        lastChangeAt = performance.now();
+      } else if (sounds.length > 0 && performance.now() - lastChangeAt >= MANIFEST_SETTLE_MS) {
+        // Held steady long enough to be believed. Counting identical reads is
+        // not enough — a set loads in pages, and the pause between pages is
+        // longer than a poll, so two matching reads accepted 20 of 25 tracks
+        // and silently lost the rest.
+        return;
       }
-      await new Promise((resolve) => setTimeout(resolve, SKIP_CONFIRM_POLL_MS));
+
+      await new Promise((resolve) => setTimeout(resolve, MANIFEST_POLL_MS));
     }
   }
 
