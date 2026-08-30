@@ -13,6 +13,8 @@
  * real duration, and played fine on its own — and was silently skipped past
  * inside the set. An unplayable track in a schedule breaks the room forever,
  * so this is the check that matters.
+ *
+ * ?set=<soundcloud set url> to harvest a set other than the current default.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -36,7 +38,12 @@ export default function SeedHarvester() {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const playerRef = useRef<SoundCloudPlayer | null>(null);
 
-  const [setUrl] = useState<string>(FIXTURE_SET_URL);
+  const [setUrl, setSetUrl] = useState<string>(FIXTURE_SET_URL);
+
+  useEffect(() => {
+    const override = new URLSearchParams(window.location.search).get('set');
+    if (override !== null && override.length > 0) setSetUrl(override);
+  }, []);
   const [sounds, setSounds] = useState<WidgetSound[]>([]);
   const [chosen, setChosen] = useState<Set<number>>(new Set());
   const [verdicts, setVerdicts] = useState<Map<number, Verdict>>(new Map());
