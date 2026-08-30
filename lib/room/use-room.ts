@@ -59,6 +59,12 @@ export function useRoom(roomSlug: string) {
   const [phase, setPhase] = useState<RoomPhase>('connecting');
   const [error, setError] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<SyncSnapshot>(INITIAL_SNAPSHOT);
+  /**
+   * The player exists and can be driven. Loading a set and waiting for its
+   * manifest to settle takes real time, and tapping before then wastes the
+   * gesture — which on mobile is the only thing that unlocks audio at all.
+   */
+  const [ready, setReady] = useState(false);
   const [track, setTrack] = useState<Track | null>(null);
   const [offsetMs, setOffsetMs] = useState(0);
   const [counts, setCounts] = useState<Map<string, number>>(new Map());
@@ -154,6 +160,7 @@ export function useRoom(roomSlug: string) {
           onChange: setSnapshot,
         });
         syncRef.current = sync;
+        setReady(true);
       })
       .catch((cause: unknown) => {
         setError(cause instanceof Error ? cause.message : String(cause));
@@ -161,6 +168,7 @@ export function useRoom(roomSlug: string) {
 
     return () => {
       cancelled = true;
+      setReady(false);
       sync?.stop();
       player?.destroy();
       syncRef.current = null;
@@ -225,6 +233,7 @@ export function useRoom(roomSlug: string) {
 
   return {
     phase,
+    ready,
     error,
     listener,
     roomName: schedule?.roomName ?? roomSlug,

@@ -37,6 +37,12 @@ export interface RoomPlayer {
   /** Current playback position in ms. */
   getPosition(): Promise<number>;
   getState(): PlayerState;
+  /**
+   * The track the player actually has loaded — which is not always the one it
+   * was asked for. A set player can advance on its own, so the room must be
+   * able to check rather than assume.
+   */
+  getLoadedUrl(): string | null;
   /** Returns an unsubscribe function. */
   onStateChange(listener: (state: PlayerState) => void): () => void;
   destroy(): void;

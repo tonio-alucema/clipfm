@@ -246,6 +246,12 @@ export default function SyncHarness() {
         <li>actual: {ms(liveActualMs)}</li>
         <li>corrections so far: {snapshot.corrections}</li>
         <li>drift at last check: {ms(snapshot.driftMs)}</li>
+        {/* Learned, not configured. On cellular this settles near 750ms; on
+            wifi it stays near zero. */}
+        <li>seek lands late by: {ms(snapshot.seekLatencyMs)}</li>
+        {/* How early the next track change will be started. Learned from how
+            long the last one took. */}
+        <li>transition started early by: {ms(snapshot.transitionLeadMs)}</li>
       </ul>
 
       <h2>Schedule</h2>

@@ -16,16 +16,24 @@
 
 import {
   DRIFT_CHECK_INTERVAL_MS,
+  BOUNDARY_CORRECTION_THRESHOLD_MS,
   DRIFT_CORRECTION_THRESHOLD_MS,
   JOIN_CORRECTION_THRESHOLD_MS,
+  MAX_SEEK_LATENCY_MS,
   MAX_STALL_RECOVERY_ATTEMPTS,
   MAX_TIMER_MS,
+  MAX_TRANSITION_LEAD_MS,
+  MIN_TRANSITION_LEAD_MS,
+  SEEK_COMPENSATION_MARGIN_MS,
+  SEEK_LATENCY_SMOOTHING,
+  STANDBY_REFRESH_MS,
   POST_SEEK_CHECK_MS,
   SEEK_SETTLE_MS,
   STALL_RECOVERY_DELAY_MS,
 } from '../config/sync';
 import type { PlayerState, RoomPlayer } from '../player/types';
 import { msUntilBoundary, positionAt, type SchedulePosition, type Track } from '../schedule';
+import { normalizeTrackUrl } from '../track-url';
 
 export type SyncSnapshot = {
   position: SchedulePosition | null;
@@ -37,6 +45,10 @@ export type SyncSnapshot = {
   /** actual - target. Positive means running ahead. */
   driftMs: number | null;
   corrections: number;
+  /** How late seeks are currently landing, in ms. Learned, not configured. */
+  seekLatencyMs: number;
+  /** How early transitions are being started, in ms. Also learned. */
+  transitionLeadMs: number;
   loadedTrackIndex: number | null;
   tunedIn: boolean;
   unavailable: boolean;
@@ -54,6 +66,8 @@ export const INITIAL_SNAPSHOT: SyncSnapshot = {
   actualMs: null,
   driftMs: null,
   corrections: 0,
+  seekLatencyMs: 0,
+  transitionLeadMs: MIN_TRANSITION_LEAD_MS,
   loadedTrackIndex: null,
   tunedIn: false,
   unavailable: false,
@@ -88,6 +102,68 @@ export function shouldCorrect({
   if (playerState !== 'playing') return false;
   if (msSinceSeek < settleMs) return false;
   return Math.abs(driftMs) > thresholdMs;
+}
+
+/**
+ * Update the running estimate of how late a seek lands.
+ *
+ * The sample is `current - drift`, not `-drift`. After a seek, drift equals
+ * the shortfall between what we aimed for and what actually happened:
+ * `drift = estimate - latency`, so `latency = estimate - drift`. Using
+ * `-drift` would work exactly once — as soon as compensation started landing
+ * on target, drift would read zero and the estimate would decay back to zero
+ * along with it, undoing itself.
+ */
+export function nextSeekLatency(
+  currentMs: number,
+  driftMs: number,
+  smoothing = SEEK_LATENCY_SMOOTHING,
+): number {
+  if (!Number.isFinite(driftMs)) return currentMs;
+  const sample = currentMs - driftMs;
+  const blended = currentMs + (sample - currentMs) * smoothing;
+  if (!Number.isFinite(blended)) return currentMs;
+  return Math.min(Math.max(blended, 0), MAX_SEEK_LATENCY_MS);
+}
+
+/**
+ * Where to actually aim, given how late seeks have been landing.
+ *
+ * Never aims into the last moments of a track: overshooting the end lands
+ * nowhere, and a transition that close is the boundary timer's job anyway.
+ */
+export function compensatedSeekTarget(
+  targetMs: number,
+  latencyMs: number,
+  durationMs: number,
+): number {
+  const aimed = targetMs + Math.max(0, latencyMs);
+  const ceiling = Math.max(0, durationMs - SEEK_COMPENSATION_MARGIN_MS);
+  return Math.max(0, Math.min(aimed, Math.max(ceiling, targetMs)));
+}
+
+/**
+ * How early to start the next transition.
+ *
+ * Learned the same way as seek latency, and for the same reason: measured from
+ * what actually happened rather than from a proxy. Timing the code around the
+ * skip measures the wrong thing — it includes confirmation work the listener
+ * never hears, so it over-estimates and hands over early. The drift observed
+ * after a handover is the honest number: positive means the new track started
+ * ahead of the schedule, so lead by that much less next time.
+ */
+export function nextTransitionLead(
+  currentMs: number,
+  observedMs: number,
+  smoothing = SEEK_LATENCY_SMOOTHING,
+): number {
+  if (!Number.isFinite(observedMs) || observedMs < 0) return currentMs;
+  const blended = currentMs + (observedMs - currentMs) * smoothing;
+  if (!Number.isFinite(blended)) return currentMs;
+  // Floored, not just capped. A lead of zero hands over exactly as the
+  // outgoing track ends, which is the one moment guaranteed to race the set
+  // player's own advance.
+  return Math.min(Math.max(blended, MIN_TRANSITION_LEAD_MS), MAX_TRANSITION_LEAD_MS);
 }
 
 export type RoomSyncOptions = {
@@ -131,11 +207,31 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
    * target then rather than reusing a value that has since gone stale.
    */
   let awaitingFirstPlay = false;
+  /**
+   * Whether the pending first playback should be seeked into place. True when
+   * joining mid-track; false after a track change, where the new track
+   * starting at zero is exactly where the schedule wants it.
+   */
+  let seekWhenPlaybackStarts = true;
   let driftTimer: ReturnType<typeof setInterval> | null = null;
   let boundaryTimer: ReturnType<typeof setTimeout> | null = null;
   let postSeekTimer: ReturnType<typeof setTimeout> | null = null;
   let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  let standbyTimer: ReturnType<typeof setInterval> | null = null;
   let recoveryAttempts = 0;
+  /** How late seeks have been landing. Learned from what actually happened. */
+  let seekLatencyMs = 0;
+  /** How long a track change takes, so the next one can be started that early. */
+  let transitionLeadMs = MIN_TRANSITION_LEAD_MS;
+
+  /**
+   * The only way this loop seeks. Compensation applied in one place so no call
+   * site can quietly forget it and reintroduce the lag.
+   */
+  function seekTo(targetMs: number, durationMs: number): void {
+    player.seekTo(compensatedSeekTarget(targetMs, seekLatencyMs, durationMs));
+    lastSeekAtPerf = perfNow();
+  }
 
   function emit(patch: Partial<SyncSnapshot>): void {
     snapshot = { ...snapshot, ...patch };
@@ -153,8 +249,7 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     awaitingFirstPlay = false;
     const current = positionAt(tracks, epochMs, serverNow());
     if (current.kind !== 'playing' || current.trackIndex !== snapshot.loadedTrackIndex) return;
-    player.seekTo(current.offsetMs);
-    lastSeekAtPerf = perfNow();
+    if (seekWhenPlaybackStarts) seekTo(current.offsetMs, current.track.durationMs);
     emit({ position: current, targetMs: current.offsetMs });
   });
 
@@ -185,7 +280,13 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     const remaining = msUntilBoundary(tracks, epochMs, serverNow());
     if (remaining === null) return;
 
-    const delay = Math.min(Math.max(remaining, 0), MAX_TIMER_MS);
+    // Start early, so the new track begins at zero when the schedule says it
+    // should rather than however long a transition takes afterwards.
+    const lead = Math.min(
+      Math.max(transitionLeadMs, MIN_TRANSITION_LEAD_MS),
+      MAX_TRANSITION_LEAD_MS,
+    );
+    const delay = Math.min(Math.max(remaining - lead, 0), MAX_TIMER_MS);
     boundaryTimer = setTimeout(() => {
       void transition();
     }, delay);
@@ -195,7 +296,16 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
   async function transition(): Promise<void> {
     if (stopped || busy) return;
 
-    const position = positionAt(tracks, epochMs, serverNow());
+    // Joining is not the same as crossing a boundary, and the difference
+    // decides everything below. A joiner arrives mid-song and must be placed
+    // into it; a boundary hands over to a track that should begin at zero.
+    const isJoin = snapshot.loadedTrackIndex === null;
+
+    // The boundary timer fires early, so the schedule may still name the
+    // outgoing track. Look ahead by the lead to find the one about to start.
+    // A join takes no lookahead: it wants where the room is now.
+    const lookaheadMs = isJoin ? 0 : transitionLeadMs;
+    const position = positionAt(tracks, epochMs, serverNow() + lookaheadMs);
     if (position.kind === 'empty') {
       emit({ position });
       return;
@@ -203,6 +313,7 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
 
     busy = true;
     const changedTrack = snapshot.loadedTrackIndex !== position.trackIndex;
+    const isBoundary = changedTrack && !isJoin;
     try {
       if (changedTrack) {
         const outcome = await player.load(position.track.url);
@@ -215,32 +326,53 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
           unavailable: outcome === 'unavailable',
         });
         if (outcome === 'unavailable') return;
+
+
       }
 
       // Recompute: the load took real time, and the schedule moved on.
       const current = positionAt(tracks, epochMs, serverNow());
       if (current.kind !== 'playing') return;
 
-      if (player.getState() === 'playing') {
-        player.seekTo(current.offsetMs);
-        lastSeekAtPerf = perfNow();
+      if (isBoundary) {
+        // The skip started the new track at zero, which — if the lead was
+        // right — is exactly where the schedule wants it. Seeking here is the
+        // second interruption and a second of the wrong part of the song. The
+        // post-transition check below corrects only if the lead was wrong.
+        seekWhenPlaybackStarts = false;
+        if (snapshot.tunedIn && player.getState() !== 'playing') awaitingFirstPlay = true;
+      } else if (player.getState() === 'playing') {
+        seekTo(current.offsetMs, current.track.durationMs);
       } else if (snapshot.tunedIn) {
         // Seeking a track that has not started is dropped, so wait for
-        // playback and let the state change above place the needle. A track
-        // change already started itself; calling play() on top of that only
-        // produces pause/play churn.
+        // playback and let the state change above place the needle.
+        seekWhenPlaybackStarts = true;
         awaitingFirstPlay = true;
+        // A track change starts itself; calling play() on top produces churn.
         if (!changedTrack) player.play();
       }
 
-      emit({ position: current, targetMs: current.offsetMs, unavailable: false });
+      // Nothing may be audible until someone tunes in. skip() starts playback
+      // by itself, so positioning the widget would otherwise have the room
+      // playing to a listener who never asked it to.
+      if (!snapshot.tunedIn) player.pause();
+
+      emit({
+        position: current,
+        targetMs: current.offsetMs,
+        unavailable: false,
+        transitionLeadMs,
+      });
 
       // The seek above lands late by however long loading and seeking took.
       // Check once more with a tight threshold, while the transition still
       // masks a correction.
       if (postSeekTimer !== null) clearTimeout(postSeekTimer);
       postSeekTimer = setTimeout(() => {
-        void checkDrift(JOIN_CORRECTION_THRESHOLD_MS);
+        void checkDrift(
+          isBoundary ? BOUNDARY_CORRECTION_THRESHOLD_MS : JOIN_CORRECTION_THRESHOLD_MS,
+          isBoundary,
+        );
       }, POST_SEEK_CHECK_MS);
     } finally {
       busy = false;
@@ -248,7 +380,10 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     }
   }
 
-  async function checkDrift(thresholdMs = DRIFT_CORRECTION_THRESHOLD_MS): Promise<void> {
+  async function checkDrift(
+    thresholdMs = DRIFT_CORRECTION_THRESHOLD_MS,
+    learnLead = false,
+  ): Promise<void> {
     if (stopped || busy || !snapshot.tunedIn) return;
 
     // A stall is not a drift problem and must not be treated as one. The
@@ -272,6 +407,17 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
       return;
     }
 
+    // The player can end up on a track nobody asked for — a set advances by
+    // itself when one ends. No amount of seeking fixes being on the wrong
+    // song, so go and fetch the right one. Forgetting what is loaded makes the
+    // next transition treat this as an arrival, which is what it is.
+    const loadedUrl = player.getLoadedUrl();
+    if (loadedUrl !== null && normalizeTrackUrl(loadedUrl) !== normalizeTrackUrl(current.track.url)) {
+      emit({ loadedTrackIndex: null });
+      void transition();
+      return;
+    }
+
     const targetMs = current.offsetMs;
     const driftMs = actualMs - targetMs;
     const playerState = player.getState();
@@ -282,14 +428,28 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     if (playerState === 'playing') {
       recoveryAttempts = 0;
       if (snapshot.contended) emit({ contended: false });
+      stopStandby();
+    }
+
+    // Learn from this reading before deciding what to do about it, so a
+    // correction issued now already aims with the freshest estimate. Only a
+    // settled reading during real playback says anything about seek latency:
+    // mid-stall or mid-seek it is measuring something else entirely.
+    const settled = perfNow() - lastSeekAtPerf >= SEEK_SETTLE_MS;
+    if (playerState === 'playing' && settled) {
+      seekLatencyMs = nextSeekLatency(seekLatencyMs, driftMs);
+    }
+    // After a handover, the drift is how far the lead overshot. Same
+    // self-correcting shape: aim for `lead - drift`.
+    if (learnLead && playerState === 'playing') {
+      transitionLeadMs = nextTransitionLead(transitionLeadMs, transitionLeadMs - driftMs);
     }
 
     let { corrections } = snapshot;
     if (
       shouldCorrect({ driftMs, playerState, msSinceSeek: perfNow() - lastSeekAtPerf, thresholdMs })
     ) {
-      player.seekTo(targetMs);
-      lastSeekAtPerf = perfNow();
+      seekTo(targetMs, current.track.durationMs);
       corrections += 1;
     }
 
@@ -300,12 +460,72 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
       driftMs: Number.isFinite(driftMs) ? driftMs : null,
       playerState,
       corrections,
+      seekLatencyMs,
     });
   }
+
+  /**
+   * Keep the silent player parked where the room is.
+   *
+   * Positioning the track early is only half of it — play() starts from
+   * wherever the needle sits, and that is zero. The listener hears the
+   * opening, then a seek to the real offset, which on cellular is seconds of
+   * rebuffering. Parking the needle instead means the tap only has to resume.
+   */
+  function refreshStandby(): void {
+    if (stopped || busy || snapshot.tunedIn) return;
+
+    const current = positionAt(tracks, epochMs, serverNow());
+    if (current.kind !== 'playing') return;
+    if (current.trackIndex !== snapshot.loadedTrackIndex) {
+      void transition();
+      return;
+    }
+
+    // Aim half a refresh ahead. Parking exactly on the room means the needle
+    // is always behind by however long until the next refresh; aiming at the
+    // middle of that window centres the error instead, which keeps it under
+    // the arrival threshold and spares the tap a correcting seek.
+    const parked = current.offsetMs + STANDBY_REFRESH_MS / 2;
+    seekTo(parked, current.track.durationMs);
+    // Seeking can start playback on its own, and nobody has tuned in.
+    player.pause();
+    emit({ targetMs: current.offsetMs });
+  }
+
+  function startStandby(): void {
+    if (standbyTimer !== null || stopped) return;
+    standbyTimer = setInterval(refreshStandby, STANDBY_REFRESH_MS);
+  }
+
+  function stopStandby(): void {
+    if (standbyTimer !== null) clearInterval(standbyTimer);
+    standbyTimer = null;
+  }
+
+  // Put the widget on the scheduled track immediately, before anyone taps.
+  //
+  // tuneIn() has to call play() synchronously — on mobile the tap is the only
+  // thing that unlocks audio, and an await in between spends it. But whatever
+  // the widget happens to be sitting on is what that play() starts, which was
+  // the first track of the set: a second of the wrong song, then an audible
+  // skip to the right one.
+  //
+  // Loading here is silent. Nothing plays, because nothing is tuned in yet, so
+  // there is no gesture to lose and nothing to hear. By the time the tap
+  // arrives the right track is already loaded and play() starts the right
+  // music.
+  void transition().then(startStandby);
 
   return {
     tuneIn() {
       if (stopped) return Promise.resolve();
+      // A fresh attempt gets a fresh budget: whatever stopped playback last
+      // time may well be gone, and a listener tapping again is asking us to
+      // try properly rather than remember why we gave up.
+      recoveryAttempts = 0;
+      if (snapshot.contended) emit({ contended: false });
+      stopStandby();
 
       // Synchronous, before any await. Mobile browsers only unlock playback
       // from inside the gesture that asked for it, and an awaited load in
@@ -329,12 +549,15 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
       if (boundaryTimer !== null) clearTimeout(boundaryTimer);
       if (postSeekTimer !== null) clearTimeout(postSeekTimer);
       if (recoveryTimer !== null) clearTimeout(recoveryTimer);
+      stopStandby();
       driftTimer = null;
       boundaryTimer = null;
       postSeekTimer = null;
       recoveryTimer = null;
       recoveryAttempts = 0;
+      // The latency estimate is kept: tuning back in is the same network.
       emit({ tunedIn: false, driftMs: null, actualMs: null, contended: false });
+      startStandby();
     },
     stop() {
       stopped = true;
@@ -342,6 +565,7 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
       if (boundaryTimer !== null) clearTimeout(boundaryTimer);
       if (postSeekTimer !== null) clearTimeout(postSeekTimer);
       if (recoveryTimer !== null) clearTimeout(recoveryTimer);
+      stopStandby();
       driftTimer = null;
       boundaryTimer = null;
       postSeekTimer = null;
