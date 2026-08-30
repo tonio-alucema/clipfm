@@ -18,6 +18,8 @@ export type ScWidget = {
   getCurrentSound(callback: (sound: unknown) => void): void;
   /** Jump to a track within a loaded set. Does not reload the iframe. */
   skip(soundIndex: number): void;
+  /** 0-100. Used to keep seed-time verification silent. */
+  setVolume(volume: number): void;
   /** Every sound in the loaded set, with durations and permalinks. */
   getSounds(callback: (sounds: unknown[]) => void): void;
 };

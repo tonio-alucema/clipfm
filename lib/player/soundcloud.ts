@@ -15,7 +15,13 @@
  * bounded by a timeout.
  */
 
-import { LOAD_TIMEOUT_MS, STALL_AFTER_MS, STALL_POLL_MS } from '../config/player';
+import {
+  LOAD_TIMEOUT_MS,
+  STALL_AFTER_MS,
+  STALL_POLL_MS,
+  VERIFY_ADVANCE_MS,
+  VERIFY_SETTLE_MS,
+} from '../config/player';
 import {
   indexSoundsByUrl,
   normalizeTrackUrl,
@@ -44,11 +50,27 @@ export type SoundCloudPlayerOptions = {
   onWidgetEvent?: (name: string, payload?: unknown) => void;
 };
 
+export type PlayabilityResult = {
+  playable: boolean;
+  /** Why not, in words a curator can act on. Null when it played. */
+  reason: string | null;
+};
+
 export type SoundCloudPlayer = RoomPlayer & {
   /** Everything in the loaded set, for seeding and for the harness. */
   getSounds: () => readonly WidgetSound[];
   /** What the widget is actually holding — not what the schedule wants. */
   getLoadedSound: () => WidgetSound | null;
+  /** 0-100. Seed tooling only; the room has no volume control. */
+  setVolume: (volume: number) => void;
+  /**
+   * Actually drive a track and see whether it plays.
+   *
+   * The only check that works. Metadata says nothing useful: the track that
+   * broke the room reported streamable, embeddable, a real duration, and
+   * loaded fine on its own.
+   */
+  verifyPlayable: (sound: WidgetSound) => Promise<PlayabilityResult>;
 };
 
 export async function createSoundCloudPlayer(
@@ -283,6 +305,42 @@ export async function createSoundCloudPlayer(
     });
   }
 
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  async function verifyPlayable(sound: WidgetSound): Promise<PlayabilityResult> {
+    widget.skip(sound.index);
+    widget.play();
+    await wait(VERIFY_SETTLE_MS);
+
+    // Did it stay? A set player skips straight past a track it cannot play,
+    // or ignores the request entirely and leaves the needle where it was.
+    const landed = await currentPermalink();
+    if (landed === null) {
+      return { playable: false, reason: 'the widget reported no track at all' };
+    }
+    if (normalizeTrackUrl(landed) !== normalizeTrackUrl(sound.url)) {
+      const actual = sounds.find((s) => normalizeTrackUrl(s.url) === normalizeTrackUrl(landed));
+      return {
+        playable: false,
+        reason: `the widget moved to "${actual?.title ?? landed}" instead`,
+      };
+    }
+
+    // It is here, but does it stream? A track can hold the needle and never
+    // produce a second of audio.
+    const before = await getPosition();
+    await wait(VERIFY_ADVANCE_MS);
+    const after = await getPosition();
+    if (!Number.isFinite(before) || !Number.isFinite(after)) {
+      return { playable: false, reason: 'the widget stopped reporting a position' };
+    }
+    if (after <= before) {
+      return { playable: false, reason: 'it loaded but never started playing' };
+    }
+
+    return { playable: true, reason: null };
+  }
+
   return {
     load,
     play() {
@@ -304,6 +362,8 @@ export async function createSoundCloudPlayer(
     getLoadedUrl: () => loadedUrl,
     getSounds: () => sounds,
     getLoadedSound: () => (currentIndex === null ? null : (sounds[currentIndex] ?? null)),
+    setVolume: (volume: number) => widget.setVolume(Math.min(100, Math.max(0, volume))),
+    verifyPlayable,
     onStateChange(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
