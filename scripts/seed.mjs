@@ -49,6 +49,22 @@ const snapshot = JSON.parse(await readFile(file, 'utf8'));
 if (typeof snapshot.setUrl !== 'string' || !snapshot.setUrl) die(`${file} has no setUrl`);
 if (!Array.isArray(snapshot.tracks) || snapshot.tracks.length === 0) die(`${file} has no tracks`);
 
+// Refuses rather than warns. A track that will not play breaks the room
+// permanently — the widget drops it, the sync loop fights to restore it, and
+// listeners hear a different song while the interface names the scheduled one.
+// Metadata does not predict this: the track that caused it reported streamable,
+// embeddable, a real duration, and played fine on its own.
+if (!snapshot.verifiedAt && !flags.has('unverified')) {
+  die(
+    `${file} has not been verified.\n` +
+      `  Open /seed, press "Verify", and save the snapshot it produces.\n` +
+      `  To seed anyway — knowing one bad track breaks the room — pass --unverified.`,
+  );
+}
+if (flags.has('unverified')) {
+  console.warn('\n  WARNING: seeding without playability verification.\n');
+}
+
 for (const [i, track] of snapshot.tracks.entries()) {
   if (typeof track.url !== 'string' || !track.url) die(`track ${i} has no url`);
   if (typeof track.durationMs !== 'number' || track.durationMs <= 0) {
@@ -103,6 +119,7 @@ console.log(`
   schedule  ${schedule.id}
   epoch     ${epochIso}
   tracks    ${snapshot.tracks.length}
+  verified  ${snapshot.verifiedAt ?? 'NO — seeded with --unverified'}
   revolution ${minutes}:${seconds}
 
   The previous schedule is untouched. To roll back, repoint
