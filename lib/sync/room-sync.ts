@@ -26,7 +26,6 @@ import {
   MIN_TRANSITION_LEAD_MS,
   SEEK_COMPENSATION_MARGIN_MS,
   SEEK_LATENCY_SMOOTHING,
-  STANDBY_REFRESH_MS,
   POST_SEEK_CHECK_MS,
   SEEK_SETTLE_MS,
   STALL_RECOVERY_DELAY_MS,
@@ -217,7 +216,6 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
   let boundaryTimer: ReturnType<typeof setTimeout> | null = null;
   let postSeekTimer: ReturnType<typeof setTimeout> | null = null;
   let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
-  let standbyTimer: ReturnType<typeof setInterval> | null = null;
   let recoveryAttempts = 0;
   /** How late seeks have been landing. Learned from what actually happened. */
   let seekLatencyMs = 0;
@@ -428,7 +426,6 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     if (playerState === 'playing') {
       recoveryAttempts = 0;
       if (snapshot.contended) emit({ contended: false });
-      stopStandby();
     }
 
     // Learn from this reading before deciding what to do about it, so a
@@ -464,45 +461,6 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
     });
   }
 
-  /**
-   * Keep the silent player parked where the room is.
-   *
-   * Positioning the track early is only half of it — play() starts from
-   * wherever the needle sits, and that is zero. The listener hears the
-   * opening, then a seek to the real offset, which on cellular is seconds of
-   * rebuffering. Parking the needle instead means the tap only has to resume.
-   */
-  function refreshStandby(): void {
-    if (stopped || busy || snapshot.tunedIn) return;
-
-    const current = positionAt(tracks, epochMs, serverNow());
-    if (current.kind !== 'playing') return;
-    if (current.trackIndex !== snapshot.loadedTrackIndex) {
-      void transition();
-      return;
-    }
-
-    // Aim half a refresh ahead. Parking exactly on the room means the needle
-    // is always behind by however long until the next refresh; aiming at the
-    // middle of that window centres the error instead, which keeps it under
-    // the arrival threshold and spares the tap a correcting seek.
-    const parked = current.offsetMs + STANDBY_REFRESH_MS / 2;
-    seekTo(parked, current.track.durationMs);
-    // Seeking can start playback on its own, and nobody has tuned in.
-    player.pause();
-    emit({ targetMs: current.offsetMs });
-  }
-
-  function startStandby(): void {
-    if (standbyTimer !== null || stopped) return;
-    standbyTimer = setInterval(refreshStandby, STANDBY_REFRESH_MS);
-  }
-
-  function stopStandby(): void {
-    if (standbyTimer !== null) clearInterval(standbyTimer);
-    standbyTimer = null;
-  }
-
   // Put the widget on the scheduled track immediately, before anyone taps.
   //
   // tuneIn() has to call play() synchronously — on mobile the tap is the only
@@ -515,7 +473,7 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
   // there is no gesture to lose and nothing to hear. By the time the tap
   // arrives the right track is already loaded and play() starts the right
   // music.
-  void transition().then(startStandby);
+  void transition();
 
   return {
     tuneIn() {
@@ -525,12 +483,21 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
       // try properly rather than remember why we gave up.
       recoveryAttempts = 0;
       if (snapshot.contended) emit({ contended: false });
-      stopStandby();
 
-      // Synchronous, before any await. Mobile browsers only unlock playback
-      // from inside the gesture that asked for it, and an awaited load in
-      // between means the tap no longer counts. This may sound the wrong
-      // track for a moment; the transition below corrects it immediately.
+      // Seek and play together, synchronously, inside the gesture.
+      //
+      // Mobile browsers only unlock playback from inside the tap that asked
+      // for it, so no await may come first. Seeking here too means the tap
+      // starts at the right place rather than wherever the needle was left —
+      // and it replaces a standby loop that re-parked the paused player once
+      // a second. That was free on wifi, where a seek costs 30ms, and
+      // ruinous on cellular, where one costs two seconds: it issued a new
+      // seek before the last had landed, so the widget never settled and
+      // tuning in could not get a foothold.
+      const current = positionAt(tracks, epochMs, serverNow());
+      if (current.kind === 'playing' && current.trackIndex === snapshot.loadedTrackIndex) {
+        seekTo(current.offsetMs, current.track.durationMs);
+      }
       player.play();
       emit({ tunedIn: true });
 
@@ -549,7 +516,6 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
       if (boundaryTimer !== null) clearTimeout(boundaryTimer);
       if (postSeekTimer !== null) clearTimeout(postSeekTimer);
       if (recoveryTimer !== null) clearTimeout(recoveryTimer);
-      stopStandby();
       driftTimer = null;
       boundaryTimer = null;
       postSeekTimer = null;
@@ -557,7 +523,6 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
       recoveryAttempts = 0;
       // The latency estimate is kept: tuning back in is the same network.
       emit({ tunedIn: false, driftMs: null, actualMs: null, contended: false });
-      startStandby();
     },
     stop() {
       stopped = true;
@@ -565,7 +530,6 @@ export function createRoomSync(options: RoomSyncOptions): RoomSync {
       if (boundaryTimer !== null) clearTimeout(boundaryTimer);
       if (postSeekTimer !== null) clearTimeout(postSeekTimer);
       if (recoveryTimer !== null) clearTimeout(recoveryTimer);
-      stopStandby();
       driftTimer = null;
       boundaryTimer = null;
       postSeekTimer = null;
