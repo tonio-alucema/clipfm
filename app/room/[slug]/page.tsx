@@ -70,30 +70,7 @@ export default function RoomPage() {
         <>
           {/* Now playing ------------------------------------------------ */}
           <section>
-            <div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-room-floor">
-              <AnimatePresence mode="popLayout">
-                {room.track?.artwork != null && (
-                  <motion.img
-                    key={room.track.artwork}
-                    src={room.track.artwork}
-                    alt=""
-                    initial={{ opacity: 0, scale: 1.04 }}
-                    animate={{
-                      opacity: 1,
-                      scale: 1,
-                      transition: { duration: DURATION.slow, ease: EASE.enter },
-                    }}
-                    exit={{
-                      opacity: 0,
-                      transition: { duration: DURATION.normal, ease: EASE.exit },
-                    }}
-                    className="absolute inset-0 h-full w-full object-cover"
-                  />
-                )}
-              </AnimatePresence>
-            </div>
-
-            <div className="mt-5 flex items-start justify-between gap-4">
+            <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <p className="truncate text-lg font-medium">{room.track?.title ?? '—'}</p>
                 <p className="truncate text-sm text-room-dim">{room.track?.artist ?? ''}</p>
@@ -124,6 +101,31 @@ export default function RoomPage() {
                 />
               </div>
               <span>{clock(room.track?.durationMs ?? 0)}</span>
+            </div>
+
+            {/* Half width, centred. The room is about the people; the record
+                sleeve is context, not the subject. */}
+            <div className="mx-auto mt-7 aspect-square w-1/2 overflow-hidden rounded-2xl bg-room-floor">
+              <AnimatePresence mode="popLayout">
+                {room.track?.artwork != null && (
+                  <motion.img
+                    key={room.track.artwork}
+                    src={room.track.artwork}
+                    alt=""
+                    initial={{ opacity: 0, scale: 1.04 }}
+                    animate={{
+                      opacity: 1,
+                      scale: 1,
+                      transition: { duration: DURATION.slow, ease: EASE.enter },
+                    }}
+                    exit={{
+                      opacity: 0,
+                      transition: { duration: DURATION.normal, ease: EASE.exit },
+                    }}
+                    className="h-full w-full object-cover"
+                  />
+                )}
+              </AnimatePresence>
             </div>
           </section>
 
