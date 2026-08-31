@@ -172,18 +172,29 @@ export default function RoomPage() {
                 player to receive it. Tapping early would spend the tap on
                 nothing and leave the room silent. */}
             {room.tunedIn && !room.contended ? (
-              <div className="flex items-center justify-between gap-4 text-xs text-room-faint">
-                <span>
+              <>
+                {/* The same shape as Tune in, reversed: the way out should
+                    carry the same weight as the way in, and read as its
+                    opposite rather than as a footnote. */}
+                <div className="flex justify-center">
+                  <motion.button
+                    type="button"
+                    onClick={room.tuneOut}
+                    whileTap={{ scale: 0.97 }}
+                    transition={SPRING.arrive}
+                    className="rounded-full border-2 border-room-ink px-12 py-5 text-sm font-medium text-room-ink"
+                  >
+                    Tune out
+                  </motion.button>
+                </div>
+                <p className="mt-2 text-center text-xs text-room-faint">
                   {room.unavailable
                     ? 'this track will not play here'
                     : room.playerState === 'stalled'
                       ? 'catching up…'
                       : 'tuned in'}
-                </span>
-                <button type="button" onClick={room.tuneOut} className="underline">
-                  tune out
-                </button>
-              </div>
+                </p>
+              </>
             ) : (
               <>
                 <div className="flex justify-center">
