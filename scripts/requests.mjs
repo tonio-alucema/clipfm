@@ -4,7 +4,7 @@
  *
  *   node --env-file=.env.local scripts/requests.mjs                 # what is waiting
  *   node --env-file=.env.local scripts/requests.mjs --all           # including handled
- *   node --env-file=.env.local scripts/requests.mjs --add <url>     # mark as added
+ *   node --env-file=.env.local scripts/requests.mjs --want <url>    # you want it
  *   node --env-file=.env.local scripts/requests.mjs --decline <url> # mark as declined
  *
  * A local script rather than a page, for the same reason seeding is: acting on
@@ -64,15 +64,16 @@ async function setStatus(trackUrl, status) {
   console.log(`\n  ${status}: ${trackUrl}  (${data.length} request(s))\n`);
 }
 
-if (flags.has('add') || flags.has('decline')) {
-  const status = flags.has('add') ? 'added' : 'declined';
-  const trackUrl = flags.get(status === 'added' ? 'add' : 'decline');
-  if (typeof trackUrl !== 'string') die(`--${status === 'added' ? 'add' : 'decline'} needs a track url.`);
+if (flags.has('want') || flags.has('decline')) {
+  const flag = flags.has('want') ? 'want' : 'decline';
+  const status = flag === 'want' ? 'requested' : 'declined';
+  const trackUrl = flags.get(flag);
+  if (typeof trackUrl !== 'string') die(`--${flag} needs a track url.`);
   await setStatus(trackUrl, status);
   process.exit(0);
 }
 
-const wanted = flags.has('all') ? ['new', 'added', 'declined'] : ['new'];
+const wanted = flags.has('all') ? ['new', 'requested', 'declined'] : ['new'];
 const { data: rows, error } = await supabase
   .from('suggestions')
   .select('track_url, listener_id, status, created_at')
@@ -138,11 +139,11 @@ entries.forEach(([trackUrl, info], index) => {
 });
 
 console.log(`  To act on one:
-    node --env-file=.env.local scripts/requests.mjs --add <url>
+    node --env-file=.env.local scripts/requests.mjs --want <url>
     node --env-file=.env.local scripts/requests.mjs --decline <url>
 
-  "Added" does not add it. SoundCloud has no public API we are allowed to
-  use, so a track joins the playlist by hand: add it to the set in
-  SoundCloud, re-run /seed to verify it actually plays, and re-seed. Marking
-  it added records that you did.
+  Marking one "requested" records a decision, not an outcome. SoundCloud has
+  no public API we are allowed to use, so adding it is yours to do by hand:
+  add the track to the set, re-run /seed to confirm it actually plays, and
+  re-seed.
 `);
