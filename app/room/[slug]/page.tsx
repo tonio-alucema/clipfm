@@ -185,7 +185,7 @@ export default function RoomPage() {
                     disabled={!room.ready}
                     whileTap={{ scale: room.ready ? 0.97 : 1 }}
                     transition={SPRING.arrive}
-                    className="rounded-full bg-room-ink px-5 py-5 text-sm font-medium text-room-void disabled:opacity-40"
+                    className="rounded-full bg-room-ink px-12 py-5 text-sm font-medium text-room-void disabled:opacity-40"
                   >
                     {!room.ready ? 'Getting ready…' : room.contended ? 'Try again' : 'Tune in'}
                   </motion.button>
