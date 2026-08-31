@@ -20,7 +20,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { HeartBurst } from '@/components/heart-burst';
 import { fetchActiveSchedule, type LiveSchedule } from '@/lib/db/schedules';
-import { favoriteTrack, fetchFavoriteCounts, type FavoriteOutcome } from '@/lib/favorites/favorites';
+import { castVote, fetchVoteTallies, type TrackVotes, type VoteOutcome } from '@/lib/votes/votes';
 import {
   deterministicUuid,
   loadListener,
@@ -44,8 +44,8 @@ export default function RoomHarness() {
   const [draftNickname, setDraftNickname] = useState('');
   const [schedule, setSchedule] = useState<LiveSchedule | null>(null);
   const [track, setTrack] = useState<Track | null>(null);
-  const [counts, setCounts] = useState<Map<string, number>>(new Map());
-  const [outcome, setOutcome] = useState<FavoriteOutcome | null>(null);
+  const [tallies, setTallies] = useState<Map<string, TrackVotes>>(new Map());
+  const [outcome, setOutcome] = useState<VoteOutcome | null>(null);
   const [isDebugListener, setIsDebugListener] = useState(false);
 
   // serverNow, so arrival order agrees between clients with wrong clocks.
@@ -80,7 +80,7 @@ export default function RoomHarness() {
       const live = await fetchActiveSchedule(slug).catch(() => null);
       if (cancelled || live === null) return;
       setSchedule(live);
-      setCounts(await fetchFavoriteCounts(live.roomId));
+      setTallies(await fetchVoteTallies(live.roomId));
     })();
     return () => {
       cancelled = true;
@@ -112,19 +112,21 @@ export default function RoomHarness() {
     // Burst first. The row is a bonus; the gesture is the point.
     sendHeart(track.url);
 
-    void favoriteTrack({
+    void castVote({
       roomId: schedule.roomId,
       trackUrl: track.url,
       listenerId: listener.id,
-    }).then((result) => {
+      direction: 1,
+    }).then((result: VoteOutcome) => {
       setOutcome(result);
-      if (result === 'saved') {
-        setCounts((previous) => {
-          const next = new Map(previous);
-          next.set(track.url, (next.get(track.url) ?? 0) + 1);
-          return next;
-        });
-      }
+      if (result !== 'saved') return;
+      setTallies((previous) => {
+        const next = new Map(previous);
+        const tally = { ...(next.get(track.url) ?? { up: 0, down: 0 }) };
+        tally.up += 1;
+        next.set(track.url, tally);
+        return next;
+      });
     });
   }, [listener, schedule, sendHeart, track]);
 
@@ -150,8 +152,8 @@ export default function RoomHarness() {
           <em>nothing — is the room seeded?</em>
         ) : (
           <>
-            <strong>{track.artist}</strong> — {track.title} — favourited{' '}
-            {counts.get(track.url) ?? 0}×
+            <strong>{track.artist}</strong> — {track.title} — liked{' '}
+            {tallies.get(track.url)?.up ?? 0}×
           </>
         )}
       </p>
@@ -194,7 +196,7 @@ export default function RoomHarness() {
         {outcome === null ? null : (
           <small>
             {outcome === 'saved' && 'saved'}
-            {outcome === 'already' && 'already yours — burst sent anyway'}
+            {outcome === 'unchanged' && 'already yours — burst sent anyway'}
             {outcome === 'failed' && 'not saved (the burst still happened)'}
           </small>
         )}
