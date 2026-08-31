@@ -17,6 +17,7 @@ import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { HeartBurst } from '@/components/heart-burst';
+import { MarqueeText } from '@/components/marquee-text';
 import { widgetIframeSrc } from '@/lib/player/widget-api';
 import { DURATION, EASE, SPRING, jitter } from '@/lib/motion';
 import { useRoom } from '@/lib/room/use-room';
@@ -71,8 +72,15 @@ export default function RoomPage() {
           {/* Now playing ------------------------------------------------ */}
           <section>
             <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <p className="truncate text-lg font-medium">{room.track?.title ?? '—'}</p>
+              <div className="min-w-0 flex-1">
+                {/* Scrolls itself only when the title does not fit. Keyed on
+                    the title so a track change starts it over rather than
+                    resuming mid-scroll on different words. */}
+                <MarqueeText
+                  key={room.track?.url ?? 'none'}
+                  text={room.track?.title ?? '—'}
+                  className="text-lg font-medium"
+                />
                 <p className="truncate text-sm text-room-dim">{room.track?.artist ?? ''}</p>
               </div>
 

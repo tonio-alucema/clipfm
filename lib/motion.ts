@@ -56,6 +56,21 @@ export const IDLE_BOB = {
 } as const;
 
 /**
+ * Marquee, for text too long to fit.
+ *
+ * Speed is a rate, not a duration: a fixed duration makes a long title whip
+ * past and a barely-overflowing one crawl. This is roughly reading pace.
+ */
+export const MARQUEE = {
+  /** Pixels per second. */
+  speed: 26,
+  /** Seconds held still at each end, so the beginning and end can be read. */
+  hold: 1.8,
+  /** Gentle at the turns; a linear start and stop reads as a jerk. */
+  ease: 'sine.inOut',
+} as const;
+
+/**
  * How long a heart lives on screen, in seconds.
  *
  * Shared between the burst animation and the code that expires it, so the two
