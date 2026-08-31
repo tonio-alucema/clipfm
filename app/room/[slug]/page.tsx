@@ -130,7 +130,10 @@ export default function RoomPage() {
           </section>
 
           {/* The room --------------------------------------------------- */}
-          <section className="relative mt-10 min-h-40">
+          {/* Takes whatever space is left and centres in it, so two listeners
+              and twelve both look like a room rather than a list pinned under
+              the artwork. */}
+          <section className="relative mt-10 flex flex-1 items-center justify-center">
             <AnimatePresence initial={false}>
               {room.hearts.map((heart) => (
                 <HeartBurst
@@ -141,7 +144,7 @@ export default function RoomPage() {
               ))}
             </AnimatePresence>
 
-            <ul className="flex flex-wrap items-end gap-x-3 gap-y-4">
+            <ul className="flex w-full flex-wrap items-end justify-center gap-x-3 gap-y-5">
               <AnimatePresence initial={false} mode="popLayout">
                 {room.listeners.map((present) => (
                   <Avatar
@@ -155,7 +158,7 @@ export default function RoomPage() {
             </ul>
           </section>
 
-          <div className="mt-auto pt-8">
+          <div className="pt-8">
             {/* Tune in needs a real gesture, and mobile only unlocks audio from
                 inside one — so the button stays disabled until there is a
                 player to receive it. Tapping early would spend the tap on
@@ -175,16 +178,18 @@ export default function RoomPage() {
               </div>
             ) : (
               <>
-                <motion.button
-                  type="button"
-                  onClick={room.tuneIn}
-                  disabled={!room.ready}
-                  whileTap={{ scale: room.ready ? 0.97 : 1 }}
-                  transition={SPRING.arrive}
-                  className="w-full rounded-full bg-room-ink py-3.5 text-sm font-medium text-room-void disabled:opacity-40"
-                >
-                  {!room.ready ? 'Getting ready…' : room.contended ? 'Try again' : 'Tune in'}
-                </motion.button>
+                <div className="flex justify-center">
+                  <motion.button
+                    type="button"
+                    onClick={room.tuneIn}
+                    disabled={!room.ready}
+                    whileTap={{ scale: room.ready ? 0.97 : 1 }}
+                    transition={SPRING.arrive}
+                    className="rounded-full bg-room-ink px-5 py-5 text-sm font-medium text-room-void disabled:opacity-40"
+                  >
+                    {!room.ready ? 'Getting ready…' : room.contended ? 'Try again' : 'Tune in'}
+                  </motion.button>
+                </div>
                 {room.contended && (
                   <p className="mt-2 text-center text-xs text-room-faint">
                     Playback would not start. If the room is open in another tab, close it.
