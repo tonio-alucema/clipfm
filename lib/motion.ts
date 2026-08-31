@@ -56,6 +56,13 @@ export const IDLE_BOB = {
 } as const;
 
 /**
+ * How long a confirmation mark holds before the thing it confirms goes away.
+ *
+ * Long enough to be seen and believed, short enough that nobody waits on it.
+ */
+export const CONFIRM_HOLD = 1.3;
+
+/**
  * Marquee, for text too long to fit.
  *
  * Speed is a rate, not a duration: a fixed duration makes a long title whip

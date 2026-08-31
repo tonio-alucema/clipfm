@@ -20,7 +20,7 @@ import { HeartBurst } from '@/components/heart-burst';
 import { MarqueeText } from '@/components/marquee-text';
 import { VoteBar } from '@/components/vote-bar';
 import { widgetIframeSrc } from '@/lib/player/widget-api';
-import { DURATION, EASE, SPRING, jitter } from '@/lib/motion';
+import { CONFIRM_HOLD, DURATION, EASE, SPRING, jitter } from '@/lib/motion';
 import { useRoom } from '@/lib/room/use-room';
 import type { SuggestionOutcome } from '@/lib/suggestions/suggestions';
 import { DEFAULT_ROOM_SLUG } from '@/lib/rooms';
@@ -36,7 +36,13 @@ export default function RoomPage() {
   const [requesting, setRequesting] = useState(false);
   const [request, setRequest] = useState('');
   const [requestResult, setRequestResult] = useState<SuggestionOutcome | null>(null);
+  const [sent, setSent] = useState(false);
   const requestRef = useRef<HTMLFormElement | null>(null);
+  const collapseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (collapseRef.current !== null) clearTimeout(collapseRef.current);
+  }, []);
 
   // The buttons sit near the bottom, so the input it reveals opens off-screen
   // on a phone — a field you cannot see is a field nobody fills in.
@@ -255,7 +261,17 @@ export default function RoomPage() {
                     event.preventDefault();
                     void room.suggest(request).then((outcome) => {
                       setRequestResult(outcome);
-                      if (outcome === 'saved') setRequest('');
+                      if (outcome !== 'saved') return;
+                      // Confirm where the action was, then take the whole
+                      // thing away — a form that stays open after a successful
+                      // send is asking whether it worked.
+                      setSent(true);
+                      collapseRef.current = setTimeout(() => {
+                        setSent(false);
+                        setRequesting(false);
+                        setRequest('');
+                        setRequestResult(null);
+                      }, CONFIRM_HOLD * 1000);
                     });
                   }}
                 >
@@ -271,13 +287,54 @@ export default function RoomPage() {
                       inputMode="url"
                       className="min-w-0 flex-1 rounded-full border border-room-edge bg-room-floor px-4 py-3 text-sm text-room-ink placeholder:text-room-faint"
                     />
-                    <button
+                    <motion.button
+                      layout
+                      transition={SPRING.arrive}
                       type="submit"
-                      disabled={request.trim().length === 0}
-                      className="rounded-full bg-room-ink px-5 py-3 text-sm font-medium text-room-void disabled:opacity-40"
+                      disabled={sent || request.trim().length === 0}
+                      className="flex items-center justify-center rounded-full bg-room-ink px-5 py-3 text-sm font-medium text-room-void disabled:opacity-40"
                     >
-                      Send
-                    </button>
+                      <AnimatePresence mode="wait" initial={false}>
+                        {sent ? (
+                          <motion.svg
+                            key="sent"
+                            viewBox="0 0 24 24"
+                            width="18"
+                            height="18"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={2.6}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-label="Sent"
+                            initial={{ opacity: 0, scale: 0.5 }}
+                            animate={{ opacity: 1, scale: 1, transition: SPRING.arrive }}
+                            exit={{
+                              opacity: 0,
+                              scale: 0.5,
+                              transition: { duration: DURATION.instant, ease: EASE.exit },
+                            }}
+                          >
+                            <path d="M4.5 12.5l5 5 10-11" />
+                          </motion.svg>
+                        ) : (
+                          <motion.span
+                            key="send"
+                            initial={{ opacity: 0 }}
+                            animate={{
+                              opacity: 1,
+                              transition: { duration: DURATION.quick, ease: EASE.enter },
+                            }}
+                            exit={{
+                              opacity: 0,
+                              transition: { duration: DURATION.instant, ease: EASE.exit },
+                            }}
+                          >
+                            Send
+                          </motion.span>
+                        )}
+                      </AnimatePresence>
+                    </motion.button>
                   </div>
                   <p className="mt-2 text-center text-xs text-room-faint">
                     {requestResult === 'saved' && 'Sent — it is up to the curator now.'}
