@@ -103,9 +103,9 @@ export default function RoomPage() {
               <span>{clock(room.track?.durationMs ?? 0)}</span>
             </div>
 
-            {/* Half width, centred. The room is about the people; the record
-                sleeve is context, not the subject. */}
-            <div className="mx-auto mt-7 aspect-square w-1/2 overflow-hidden rounded-2xl bg-room-floor">
+            {/* A quarter of the width, centred. The room is about the people;
+                the record sleeve is context, not the subject. */}
+            <div className="mx-auto mt-7 aspect-square w-1/4 overflow-hidden rounded-2xl bg-room-floor">
               <AnimatePresence mode="popLayout">
                 {room.track?.artwork != null && (
                   <motion.img
