@@ -14,13 +14,15 @@
 
 import { AnimatePresence, motion } from 'framer-motion';
 import { useParams } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { HeartBurst } from '@/components/heart-burst';
 import { MarqueeText } from '@/components/marquee-text';
+import { VoteBar } from '@/components/vote-bar';
 import { widgetIframeSrc } from '@/lib/player/widget-api';
 import { DURATION, EASE, SPRING, jitter } from '@/lib/motion';
 import { useRoom } from '@/lib/room/use-room';
+import type { SuggestionOutcome } from '@/lib/suggestions/suggestions';
 import { DEFAULT_ROOM_SLUG } from '@/lib/rooms';
 
 function clock(ms: number): string {
@@ -31,8 +33,17 @@ function clock(ms: number): string {
 export default function RoomPage() {
   const params = useParams<{ slug: string }>();
   const room = useRoom(params.slug ?? DEFAULT_ROOM_SLUG);
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState('');
+  const [requesting, setRequesting] = useState(false);
+  const [request, setRequest] = useState('');
+  const [requestResult, setRequestResult] = useState<SuggestionOutcome | null>(null);
+  const requestRef = useRef<HTMLFormElement | null>(null);
+
+  // The buttons sit near the bottom, so the input it reveals opens off-screen
+  // on a phone — a field you cannot see is a field nobody fills in.
+  useEffect(() => {
+    if (!requesting) return;
+    requestRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [requesting]);
 
   const progress =
     room.track === null ? 0 : Math.min(1, room.offsetMs / room.track.durationMs);
@@ -84,18 +95,13 @@ export default function RoomPage() {
                 <p className="truncate text-sm text-room-dim">{room.track?.artist ?? ''}</p>
               </div>
 
-              <motion.button
-                type="button"
-                onClick={room.throwHeart}
-                whileTap={{ scale: 0.88 }}
-                transition={SPRING.arrive}
-                aria-label={room.hasFavorited ? 'Favourited' : 'Favourite this track'}
-                className="flex shrink-0 items-center gap-1.5 rounded-full border border-room-edge px-3.5 py-2 text-sm"
-                style={{ color: room.hasFavorited ? 'var(--color-room-heart)' : undefined }}
-              >
-                <span aria-hidden>♥</span>
-                <span className="tabular-nums">{room.favoriteCount}</span>
-              </motion.button>
+              <VoteBar
+                up={room.votes.up}
+                down={room.votes.down}
+                myVote={room.myVote}
+                onVote={room.vote}
+                likedTracks={room.likedTracks}
+              />
             </div>
 
             {/* Everyone is at the same point in this bar, which is the whole
@@ -154,14 +160,19 @@ export default function RoomPage() {
 
             <ul className="flex w-full flex-wrap items-end justify-center gap-x-3 gap-y-5">
               <AnimatePresence initial={false} mode="popLayout">
-                {room.listeners.map((present) => (
-                  <Avatar
-                    key={present.id}
-                    id={present.id}
-                    nickname={present.nickname}
-                    isSelf={present.id === room.listener?.id}
-                  />
-                ))}
+                {room.listeners.map((present) => {
+                  const isSelf = present.id === room.listener?.id;
+                  return (
+                    <Avatar
+                      key={present.id}
+                      id={present.id}
+                      nickname={present.nickname}
+                      isSelf={isSelf}
+                      // Only your own name is yours to change.
+                      {...(isSelf ? { onRename: room.setNickname } : {})}
+                    />
+                  );
+                })}
               </AnimatePresence>
             </ul>
           </section>
@@ -169,83 +180,116 @@ export default function RoomPage() {
           <div className="pt-8">
             {/* Tune in needs a real gesture, and mobile only unlocks audio from
                 inside one — so the button stays disabled until there is a
-                player to receive it. Tapping early would spend the tap on
-                nothing and leave the room silent. */}
-            {room.tunedIn && !room.contended ? (
-              <>
-                {/* The same shape as Tune in, reversed: the way out should
-                    carry the same weight as the way in, and read as its
-                    opposite rather than as a footnote. */}
-                <div className="flex justify-center">
-                  <motion.button
-                    type="button"
-                    onClick={room.tuneOut}
-                    whileTap={{ scale: 0.97 }}
-                    transition={SPRING.arrive}
-                    className="rounded-full border-2 border-room-ink px-12 py-5 text-sm font-medium text-room-ink"
-                  >
-                    Tune out
-                  </motion.button>
-                </div>
-                <p className="mt-2 text-center text-xs text-room-faint">
-                  {room.unavailable
-                    ? 'this track will not play here'
-                    : room.playerState === 'stalled'
-                      ? 'catching up…'
-                      : 'tuned in'}
-                </p>
-              </>
-            ) : (
-              <>
-                <div className="flex justify-center">
-                  <motion.button
-                    type="button"
-                    onClick={room.tuneIn}
-                    disabled={!room.ready}
-                    whileTap={{ scale: room.ready ? 0.97 : 1 }}
-                    transition={SPRING.arrive}
-                    className="rounded-full bg-room-ink px-12 py-5 text-sm font-medium text-room-void disabled:opacity-40"
-                  >
-                    {!room.ready ? 'Getting ready…' : room.contended ? 'Try again' : 'Tune in'}
-                  </motion.button>
-                </div>
-                {room.contended && (
-                  <p className="mt-2 text-center text-xs text-room-faint">
-                    Playback would not start. If the room is open in another tab, close it.
-                  </p>
-                )}
-              </>
+                player to receive it. */}
+            <div className="flex items-center justify-center gap-3">
+              {room.tunedIn && !room.contended ? (
+                <motion.button
+                  type="button"
+                  onClick={room.tuneOut}
+                  whileTap={{ scale: 0.97 }}
+                  transition={SPRING.arrive}
+                  className="rounded-full border-2 border-room-ink px-12 py-5 text-sm font-medium text-room-ink"
+                >
+                  Tune out
+                </motion.button>
+              ) : (
+                <motion.button
+                  type="button"
+                  onClick={room.tuneIn}
+                  disabled={!room.ready}
+                  whileTap={{ scale: room.ready ? 0.97 : 1 }}
+                  transition={SPRING.arrive}
+                  className="rounded-full bg-room-ink px-12 py-5 text-sm font-medium text-room-void disabled:opacity-40"
+                >
+                  {!room.ready ? 'Getting ready…' : room.contended ? 'Try again' : 'Tune in'}
+                </motion.button>
+              )}
+
+              <motion.button
+                type="button"
+                onClick={() => {
+                  setRequestResult(null);
+                  setRequesting((was) => !was);
+                }}
+                whileTap={{ scale: 0.97 }}
+                transition={SPRING.arrive}
+                aria-expanded={requesting}
+                className="rounded-full border border-room-edge px-6 py-5 text-sm font-medium text-room-dim"
+              >
+                Request track
+              </motion.button>
+            </div>
+
+            {room.tunedIn && !room.contended && (
+              <p className="mt-2 text-center text-xs text-room-faint">
+                {room.unavailable
+                  ? 'this track will not play here'
+                  : room.playerState === 'stalled'
+                    ? 'catching up…'
+                    : 'tuned in'}
+              </p>
+            )}
+            {room.contended && (
+              <p className="mt-2 text-center text-xs text-room-faint">
+                Playback would not start. If the room is open in another tab, close it.
+              </p>
             )}
 
-            <div className="mt-4 text-center text-xs text-room-faint">
-              {renaming ? (
-                <input
-                  autoFocus
-                  value={draft}
-                  maxLength={24}
-                  aria-label="your name"
-                  onChange={(event) => setDraft(event.target.value)}
-                  onBlur={() => {
-                    room.setNickname(draft);
-                    setRenaming(false);
+            <AnimatePresence>
+              {requesting && (
+                <motion.form
+                  ref={requestRef}
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{
+                    opacity: 1,
+                    height: 'auto',
+                    transition: { duration: DURATION.normal, ease: EASE.enter },
                   }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') event.currentTarget.blur();
+                  exit={{
+                    opacity: 0,
+                    height: 0,
+                    transition: { duration: DURATION.quick, ease: EASE.exit },
                   }}
-                  className="w-40 rounded-md border border-room-edge bg-room-floor px-2 py-1 text-center text-room-ink"
-                />
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDraft(room.listener?.nickname ?? '');
-                    setRenaming(true);
+                  className="overflow-hidden"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void room.suggest(request).then((outcome) => {
+                      setRequestResult(outcome);
+                      if (outcome === 'saved') setRequest('');
+                    });
                   }}
                 >
-                  you are <span className="text-room-dim">{room.listener?.nickname}</span>
-                </button>
+                  <div className="mt-4 flex gap-2">
+                    <input
+                      value={request}
+                      onChange={(event) => {
+                        setRequest(event.target.value);
+                        setRequestResult(null);
+                      }}
+                      placeholder="paste soundcloud link here"
+                      aria-label="SoundCloud track link"
+                      inputMode="url"
+                      className="min-w-0 flex-1 rounded-full border border-room-edge bg-room-floor px-4 py-3 text-sm text-room-ink placeholder:text-room-faint"
+                    />
+                    <button
+                      type="submit"
+                      disabled={request.trim().length === 0}
+                      className="rounded-full bg-room-ink px-5 py-3 text-sm font-medium text-room-void disabled:opacity-40"
+                    >
+                      Send
+                    </button>
+                  </div>
+                  <p className="mt-2 text-center text-xs text-room-faint">
+                    {requestResult === 'saved' && 'Sent — it is up to the curator now.'}
+                    {requestResult === 'already' && 'You have already asked for that one.'}
+                    {requestResult === 'invalid' &&
+                      'That is not a SoundCloud track link. A set or a profile will not play here.'}
+                    {requestResult === 'failed' && 'Could not send that. Try again in a moment.'}
+                    {requestResult === null && 'A link to a single track, not a playlist.'}
+                  </p>
+                </motion.form>
               )}
-            </div>
+            </AnimatePresence>
           </div>
         </>
       )}

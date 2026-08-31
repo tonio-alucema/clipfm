@@ -15,11 +15,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchActiveSchedule, type LiveSchedule } from '../db/schedules';
+import { suggestTrack, type SuggestionOutcome } from '../suggestions/suggestions';
 import {
-  favoriteTrack,
-  fetchFavoriteCounts,
-  fetchMyFavorites,
-} from '../favorites/favorites';
+  castVote,
+  fetchMyVotes,
+  fetchVoteTallies,
+  type TrackVotes,
+  type VoteDirection,
+} from '../votes/votes';
 import {
   loadListener,
   normalizeNickname,
@@ -67,8 +70,8 @@ export function useRoom(roomSlug: string) {
   const [ready, setReady] = useState(false);
   const [track, setTrack] = useState<Track | null>(null);
   const [offsetMs, setOffsetMs] = useState(0);
-  const [counts, setCounts] = useState<Map<string, number>>(new Map());
-  const [mine, setMine] = useState<Set<string>>(new Set());
+  const [tallies, setTallies] = useState<Map<string, TrackVotes>>(new Map());
+  const [myVotes, setMyVotes] = useState<Map<string, VoteDirection>>(new Map());
 
   const serverNow = useCallback(() => {
     const offset = clockRef.current;
@@ -106,13 +109,13 @@ export function useRoom(roomSlug: string) {
       setSchedule(live);
       setPhase('ready');
 
-      const [allCounts, myFavorites] = await Promise.all([
-        fetchFavoriteCounts(live.roomId),
-        fetchMyFavorites(live.roomId, loaded.id),
+      const [allTallies, mine] = await Promise.all([
+        fetchVoteTallies(live.roomId),
+        fetchMyVotes(live.roomId, loaded.id),
       ]);
       if (cancelled) return;
-      setCounts(allCounts);
-      setMine(myFavorites);
+      setTallies(allTallies);
+      setMyVotes(mine);
     })();
 
     return () => {
@@ -198,26 +201,59 @@ export function useRoom(roomSlug: string) {
     now: serverNow,
   });
 
-  const throwHeart = useCallback(() => {
-    if (track === null || schedule === null || listener === null) return;
+  const vote = useCallback(
+    (direction: VoteDirection) => {
+      if (track === null || schedule === null || listener === null) return;
 
-    // The burst first, always. The row is a consequence of the gesture, never
-    // a precondition for it.
-    sendHeart(track.url);
-    if (mine.has(track.url)) return;
+      const trackUrl = track.url;
+      const previous = myVotes.get(trackUrl);
+      if (previous === direction) return;
 
-    void favoriteTrack({
-      roomId: schedule.roomId,
-      trackUrl: track.url,
-      listenerId: listener.id,
-    }).then((outcome) => {
-      if (outcome === 'failed') return;
-      setMine((previous) => new Set(previous).add(track.url));
-      if (outcome === 'saved') {
-        setCounts((previous) => new Map(previous).set(track.url, (previous.get(track.url) ?? 0) + 1));
-      }
-    });
-  }, [listener, mine, schedule, sendHeart, track]);
+      // The burst first, always. The row is a consequence of the gesture,
+      // never a precondition for it.
+      if (direction === 1) sendHeart(trackUrl);
+
+      // Optimistic: the tally moves now, and is reconciled by the write only
+      // if it fails.
+      setMyVotes((current) => new Map(current).set(trackUrl, direction));
+      setTallies((current) => {
+        const next = new Map(current);
+        const tally = { ...(next.get(trackUrl) ?? { up: 0, down: 0 }) };
+        if (previous === 1) tally.up -= 1;
+        if (previous === -1) tally.down -= 1;
+        if (direction === 1) tally.up += 1;
+        else tally.down += 1;
+        next.set(trackUrl, tally);
+        return next;
+      });
+
+      void castVote({
+        roomId: schedule.roomId,
+        trackUrl,
+        listenerId: listener.id,
+        direction,
+      }).then((outcome) => {
+        if (outcome !== 'failed') return;
+        // Put it back the way it was rather than leaving a number that is not
+        // true.
+        setMyVotes((current) => {
+          const next = new Map(current);
+          if (previous === undefined) next.delete(trackUrl);
+          else next.set(trackUrl, previous);
+          return next;
+        });
+      });
+    },
+    [listener, myVotes, schedule, sendHeart, track],
+  );
+
+  const suggest = useCallback(
+    async (input: string): Promise<SuggestionOutcome> => {
+      if (schedule === null || listener === null) return 'failed';
+      return suggestTrack({ roomId: schedule.roomId, listenerId: listener.id, input });
+    },
+    [listener, schedule],
+  );
 
   const setNickname = useCallback(
     (raw: string) => {
@@ -249,13 +285,26 @@ export function useRoom(roomSlug: string) {
     listeners: listeners as PresentListener[],
     hearts: hearts as HeartBurstEvent[],
 
-    favoriteCount: track === null ? 0 : (counts.get(track.url) ?? 0),
-    hasFavorited: track !== null && mine.has(track.url),
+    votes: track === null ? { up: 0, down: 0 } : (tallies.get(track.url) ?? { up: 0, down: 0 }),
+    myVote: track === null ? undefined : myVotes.get(track.url),
+    /**
+     * What this listener has voted up, newest schedule order. Titles come from
+     * the schedule where it knows them; a track voted up under an older
+     * schedule is still shown, by its link.
+     */
+    likedTracks: [...myVotes.entries()]
+      .filter(([, direction]) => direction === 1)
+      .map(([url]) => ({
+        url,
+        title: schedule?.tracks.find((candidate) => candidate.url === url)?.title ?? url,
+        artist: schedule?.tracks.find((candidate) => candidate.url === url)?.artist ?? null,
+      })),
 
     iframeRef,
     tuneIn: useCallback(() => void syncRef.current?.tuneIn(), []),
     tuneOut: useCallback(() => syncRef.current?.tuneOut(), []),
-    throwHeart,
+    vote,
+    suggest,
     setNickname,
   };
 }

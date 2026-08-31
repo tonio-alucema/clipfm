@@ -17,7 +17,7 @@
 
 import { motion } from 'framer-motion';
 import gsap from 'gsap';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AvatarFace } from '@/components/avatar-face';
 import { DURATION, EASE, IDLE_BOB, SPRING, jitter } from '@/lib/motion';
 
@@ -30,10 +30,18 @@ export type AvatarProps = {
   id: string;
   nickname: string;
   isSelf?: boolean;
+  /**
+   * Only ever passed for your own avatar. Renaming is done by clicking your
+   * own name, where the name is — not in a settings line somewhere else on the
+   * page describing who you are.
+   */
+  onRename?: (nickname: string) => void;
 };
 
-export function Avatar({ id, nickname, isSelf = false }: AvatarProps) {
+export function Avatar({ id, nickname, isSelf = false, onRename }: AvatarProps) {
   const bobRef = useRef<HTMLDivElement | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(nickname);
 
   useEffect(() => {
     const element = bobRef.current;
@@ -99,20 +107,53 @@ export function Avatar({ id, nickname, isSelf = false }: AvatarProps) {
       <div ref={bobRef}>
         <AvatarFace id={id} title={nickname} />
       </div>
-      <span
-        style={{
-          fontSize: '0.8rem',
-          opacity: isSelf ? 1 : 0.7,
-          fontWeight: isSelf ? 600 : 400,
-          textAlign: 'center',
-          lineHeight: 1.2,
-          maxWidth: '100%',
-          overflowWrap: 'anywhere',
-        }}
-      >
-        {nickname}
-        {isSelf && <span style={{ opacity: 0.6 }}> (you)</span>}
-      </span>
+      {editing && onRename !== undefined ? (
+        <input
+          autoFocus
+          value={draft}
+          maxLength={24}
+          aria-label="your name"
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={() => {
+            onRename(draft);
+            setEditing(false);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur();
+            if (event.key === 'Escape') {
+              setDraft(nickname);
+              setEditing(false);
+            }
+          }}
+          className="w-full rounded-md border border-room-edge bg-room-floor px-1 py-0.5 text-center text-[0.8rem] text-room-ink"
+        />
+      ) : (
+        <button
+          type="button"
+          disabled={onRename === undefined}
+          onClick={() => {
+            setDraft(nickname);
+            setEditing(true);
+          }}
+          style={{
+            fontSize: '0.8rem',
+            opacity: isSelf ? 1 : 0.7,
+            fontWeight: isSelf ? 600 : 400,
+            textAlign: 'center',
+            lineHeight: 1.2,
+            maxWidth: '100%',
+            overflowWrap: 'anywhere',
+            // Only your own name invites a click, so only it looks clickable.
+            cursor: onRename === undefined ? 'default' : 'text',
+            textDecoration: onRename === undefined ? 'none' : 'underline',
+            textDecorationStyle: 'dotted',
+            textUnderlineOffset: '3px',
+            textDecorationColor: 'var(--color-room-faint)',
+          }}
+        >
+          {nickname}
+        </button>
+      )}
     </motion.li>
   );
 }
