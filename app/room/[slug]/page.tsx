@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { HeartBurst } from '@/components/heart-burst';
 import { MarqueeText } from '@/components/marquee-text';
-import { VoteBar } from '@/components/vote-bar';
+import { FavoriteBar } from '@/components/favorite-bar';
 import { widgetIframeSrc } from '@/lib/player/widget-api';
 import { CONFIRM_HOLD, DURATION, EASE, SPRING, jitter } from '@/lib/motion';
 import { useRoom } from '@/lib/room/use-room';
@@ -101,11 +101,10 @@ export default function RoomPage() {
                 <p className="truncate text-sm text-room-dim">{room.track?.artist ?? ''}</p>
               </div>
 
-              <VoteBar
-                up={room.votes.up}
-                down={room.votes.down}
-                myVote={room.myVote}
-                onVote={room.vote}
+              <FavoriteBar
+                count={room.favorites}
+                isMine={room.isFavorited}
+                onFavorite={room.favorite}
                 likedTracks={room.likedTracks}
               />
             </div>

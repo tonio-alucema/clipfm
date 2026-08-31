@@ -1,16 +1,16 @@
 'use client';
 
 /**
- * Thumbs up, thumbs down, and what you have liked.
+ * The heart, and what you have favourited.
  *
- * One thumb drawn once and rotated for the other, so the two can never drift
- * apart visually.
+ * One button, because a favourite only points one way. Filled once it is
+ * yours and stays filled — there is no un-heart, so the pressed state is a
+ * record rather than a toggle.
  */
 
 import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useRef, useState } from 'react';
 import { DURATION, EASE, SPRING } from '@/lib/motion';
-import type { VoteDirection } from '@/lib/votes/votes';
 
 export type LikedTrack = {
   url: string;
@@ -18,21 +18,21 @@ export type LikedTrack = {
   artist: string | null;
 };
 
-function Thumb({ down = false }: { down?: boolean }) {
+function Heart({ filled = false }: { filled?: boolean }) {
   return (
     <svg
       viewBox="0 0 24 24"
       width="17"
       height="17"
-      fill="none"
+      fill={filled ? 'currentColor' : 'none'}
       stroke="currentColor"
       strokeWidth={1.8}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden
-      style={{ transform: down ? 'rotate(180deg)' : undefined, display: 'block' }}
+      style={{ display: 'block' }}
     >
-      <path d="M6 21V10l4.6-7.4A1.6 1.6 0 0 1 13 3.7V8.6h5.3a2 2 0 0 1 2 2.4l-1.4 7.2a2.4 2.4 0 0 1-2.4 1.9H8a2 2 0 0 1-2-2z" />
+      <path d="M12 20.3 4.3 12.6a4.6 4.6 0 0 1 0-6.5 4.6 4.6 0 0 1 6.5 0l1.2 1.2 1.2-1.2a4.6 4.6 0 0 1 6.5 0 4.6 4.6 0 0 1 0 6.5z" />
     </svg>
   );
 }
@@ -55,15 +55,14 @@ function ExternalLink() {
   );
 }
 
-export type VoteBarProps = {
-  up: number;
-  down: number;
-  myVote: VoteDirection | undefined;
-  onVote: (direction: VoteDirection) => void;
+export type FavoriteBarProps = {
+  count: number;
+  isMine: boolean;
+  onFavorite: () => void;
   likedTracks: readonly LikedTrack[];
 };
 
-export function VoteBar({ up, down, myVote, onVote, likedTracks }: VoteBarProps) {
+export function FavoriteBar({ count, isMine, onFavorite, likedTracks }: FavoriteBarProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -86,37 +85,19 @@ export function VoteBar({ up, down, myVote, onVote, likedTracks }: VoteBarProps)
 
   return (
     <div ref={wrapRef} className="relative flex shrink-0 items-center gap-2">
-      <div className="flex items-center gap-1 rounded-full border border-room-edge">
-        <motion.button
-          type="button"
-          onClick={() => onVote(1)}
-          whileTap={{ scale: 0.88 }}
-          transition={SPRING.arrive}
-          aria-label="Thumbs up"
-          aria-pressed={myVote === 1}
-          className="flex items-center gap-1.5 rounded-full py-2 pl-3.5 pr-2 text-sm"
-          style={{ color: myVote === 1 ? 'var(--color-room-heart)' : undefined }}
-        >
-          <Thumb />
-          <span className="tabular-nums">{up}</span>
-        </motion.button>
-
-        <span aria-hidden className="h-4 w-px bg-room-edge" />
-
-        <motion.button
-          type="button"
-          onClick={() => onVote(-1)}
-          whileTap={{ scale: 0.88 }}
-          transition={SPRING.arrive}
-          aria-label="Thumbs down"
-          aria-pressed={myVote === -1}
-          className="flex items-center gap-1.5 rounded-full py-2 pl-2 pr-3.5 text-sm"
-          style={{ color: myVote === -1 ? 'var(--color-room-dim)' : undefined }}
-        >
-          <Thumb down />
-          <span className="tabular-nums">{down}</span>
-        </motion.button>
-      </div>
+      <motion.button
+        type="button"
+        onClick={onFavorite}
+        whileTap={{ scale: 0.88 }}
+        transition={SPRING.arrive}
+        aria-label="Favourite this track"
+        aria-pressed={isMine}
+        className="flex items-center gap-1.5 rounded-full border border-room-edge py-2 pl-3.5 pr-3.5 text-sm"
+        style={{ color: isMine ? 'var(--color-room-heart)' : undefined }}
+      >
+        <Heart filled={isMine} />
+        <span className="tabular-nums">{count}</span>
+      </motion.button>
 
       {/* Only offered once there is something in it. */}
       {likedTracks.length > 0 && (
@@ -124,7 +105,7 @@ export function VoteBar({ up, down, myVote, onVote, likedTracks }: VoteBarProps)
           type="button"
           onClick={() => setOpen((was) => !was)}
           aria-expanded={open}
-          aria-label={`Tracks you liked (${likedTracks.length})`}
+          aria-label={`Tracks you favourited (${likedTracks.length})`}
           className="rounded-full border border-room-edge px-2 py-2 text-xs text-room-dim"
         >
           <motion.span
@@ -146,7 +127,7 @@ export function VoteBar({ up, down, myVote, onVote, likedTracks }: VoteBarProps)
             exit={{ opacity: 0, y: -6, transition: { duration: DURATION.quick, ease: EASE.exit } }}
             className="absolute right-0 top-full z-10 mt-2 max-h-64 w-72 overflow-y-auto rounded-xl border border-room-edge bg-room-floor p-1.5 shadow-xl"
           >
-            <p className="px-2.5 py-1.5 text-xs text-room-faint">You liked</p>
+            <p className="px-2.5 py-1.5 text-xs text-room-faint">You favourited</p>
             <ul>
               {likedTracks.map((liked) => (
                 <li key={liked.url}>
