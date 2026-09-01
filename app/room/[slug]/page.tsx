@@ -135,7 +135,7 @@ export default function RoomPage() {
                 <MarqueeText
                   key={room.track?.url ?? 'none'}
                   text={room.track?.title ?? '—'}
-                  className="text-lg font-medium"
+                  className="text-base font-medium"
                 />
                 <p className="truncate text-sm text-room-dim">{room.track?.artist ?? ''}</p>
               </motion.div>
