@@ -154,6 +154,16 @@ export function Avatar({ id, nickname, isSelf = false, onRename }: AvatarProps) 
           {nickname}
         </button>
       )}
+
+      {/* The slot is reserved on every avatar, not only yours. The row is
+          bottom-aligned, so a line that exists on one avatar and not the
+          others would lift yours out of step with the room. */}
+      <span
+        className="h-3 text-[0.6rem] leading-3 text-room-faint"
+        style={{ pointerEvents: 'none' }}
+      >
+        {isSelf ? '(you)' : ''}
+      </span>
     </motion.li>
   );
 }

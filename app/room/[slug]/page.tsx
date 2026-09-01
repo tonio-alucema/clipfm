@@ -132,6 +132,9 @@ export default function RoomPage() {
           <section>
             <div className="flex items-start justify-between gap-4">
               <motion.div {...recede} className="min-w-0 flex-1">
+                <p className="mb-1 text-[10px] font-medium uppercase tracking-widest text-room-faint">
+                  now playing
+                </p>
                 {/* Scrolls itself only when the title does not fit. Keyed on
                     the title so a track change starts it over rather than
                     resuming mid-scroll on different words. */}
