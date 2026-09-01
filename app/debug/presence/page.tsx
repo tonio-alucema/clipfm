@@ -20,7 +20,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { HeartBurst } from '@/components/heart-burst';
 import { fetchActiveSchedule, type LiveSchedule } from '@/lib/db/schedules';
-import { castVote, fetchVoteTallies, type TrackVotes, type VoteOutcome } from '@/lib/votes/votes';
+import {
+  favoriteTrack,
+  fetchFavoriteCounts,
+  type FavoriteOutcome,
+} from '@/lib/favorites/favorites';
 import {
   deterministicUuid,
   loadListener,
@@ -44,8 +48,8 @@ export default function RoomHarness() {
   const [draftNickname, setDraftNickname] = useState('');
   const [schedule, setSchedule] = useState<LiveSchedule | null>(null);
   const [track, setTrack] = useState<Track | null>(null);
-  const [tallies, setTallies] = useState<Map<string, TrackVotes>>(new Map());
-  const [outcome, setOutcome] = useState<VoteOutcome | null>(null);
+  const [counts, setCounts] = useState<Map<string, number>>(new Map());
+  const [outcome, setOutcome] = useState<FavoriteOutcome | null>(null);
   const [isDebugListener, setIsDebugListener] = useState(false);
 
   // serverNow, so arrival order agrees between clients with wrong clocks.
@@ -80,7 +84,7 @@ export default function RoomHarness() {
       const live = await fetchActiveSchedule(slug).catch(() => null);
       if (cancelled || live === null) return;
       setSchedule(live);
-      setTallies(await fetchVoteTallies(live.roomId));
+      setCounts(await fetchFavoriteCounts(live.roomId));
     })();
     return () => {
       cancelled = true;
@@ -112,21 +116,16 @@ export default function RoomHarness() {
     // Burst first. The row is a bonus; the gesture is the point.
     sendHeart(track.url);
 
-    void castVote({
+    void favoriteTrack({
       roomId: schedule.roomId,
       trackUrl: track.url,
       listenerId: listener.id,
-      direction: 1,
-    }).then((result: VoteOutcome) => {
+    }).then((result: FavoriteOutcome) => {
       setOutcome(result);
       if (result !== 'saved') return;
-      setTallies((previous) => {
-        const next = new Map(previous);
-        const tally = { ...(next.get(track.url) ?? { up: 0, down: 0 }) };
-        tally.up += 1;
-        next.set(track.url, tally);
-        return next;
-      });
+      setCounts((previous) =>
+        new Map(previous).set(track.url, (previous.get(track.url) ?? 0) + 1),
+      );
     });
   }, [listener, schedule, sendHeart, track]);
 
@@ -153,7 +152,7 @@ export default function RoomHarness() {
         ) : (
           <>
             <strong>{track.artist}</strong> — {track.title} — liked{' '}
-            {tallies.get(track.url)?.up ?? 0}×
+            {counts.get(track.url) ?? 0}×
           </>
         )}
       </p>

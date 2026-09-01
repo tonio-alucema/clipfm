@@ -17,12 +17,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchActiveSchedule, type LiveSchedule } from '../db/schedules';
 import { suggestTrack, type SuggestionOutcome } from '../suggestions/suggestions';
 import {
-  castVote,
-  fetchMyVotes,
-  fetchVoteTallies,
-  type TrackVotes,
-  type VoteDirection,
-} from '../votes/votes';
+  favoriteTrack,
+  fetchFavoriteCounts,
+  fetchMyFavorites,
+} from '../favorites/favorites';
 import {
   loadListener,
   normalizeNickname,
@@ -70,8 +68,8 @@ export function useRoom(roomSlug: string) {
   const [ready, setReady] = useState(false);
   const [track, setTrack] = useState<Track | null>(null);
   const [offsetMs, setOffsetMs] = useState(0);
-  const [tallies, setTallies] = useState<Map<string, TrackVotes>>(new Map());
-  const [myVotes, setMyVotes] = useState<Map<string, VoteDirection>>(new Map());
+  const [counts, setCounts] = useState<Map<string, number>>(new Map());
+  const [myFavorites, setMyFavorites] = useState<Set<string>>(new Set());
 
   const serverNow = useCallback(() => {
     const offset = clockRef.current;
@@ -109,13 +107,13 @@ export function useRoom(roomSlug: string) {
       setSchedule(live);
       setPhase('ready');
 
-      const [allTallies, mine] = await Promise.all([
-        fetchVoteTallies(live.roomId),
-        fetchMyVotes(live.roomId, loaded.id),
+      const [allCounts, mine] = await Promise.all([
+        fetchFavoriteCounts(live.roomId),
+        fetchMyFavorites(live.roomId, loaded.id),
       ]);
       if (cancelled) return;
-      setTallies(allTallies);
-      setMyVotes(mine);
+      setCounts(allCounts);
+      setMyFavorites(mine);
     })();
 
     return () => {
@@ -201,51 +199,45 @@ export function useRoom(roomSlug: string) {
     now: serverNow,
   });
 
-  const vote = useCallback(
-    (direction: VoteDirection) => {
-      if (track === null || schedule === null || listener === null) return;
+  const favorite = useCallback(() => {
+    if (track === null || schedule === null || listener === null) return;
 
-      const trackUrl = track.url;
-      const previous = myVotes.get(trackUrl);
-      if (previous === direction) return;
+    const trackUrl = track.url;
+    // Already yours. The burst is still worth throwing — the gesture is the
+    // point — but nothing about the count changes.
+    if (myFavorites.has(trackUrl)) {
+      sendHeart(trackUrl);
+      return;
+    }
 
-      // The burst first, always. The row is a consequence of the gesture,
-      // never a precondition for it.
-      if (direction === 1) sendHeart(trackUrl);
+    // The burst first, always. The row is a consequence of the gesture, never
+    // a precondition for it.
+    sendHeart(trackUrl);
 
-      // Optimistic: the tally moves now, and is reconciled by the write only
-      // if it fails.
-      setMyVotes((current) => new Map(current).set(trackUrl, direction));
-      setTallies((current) => {
-        const next = new Map(current);
-        const tally = { ...(next.get(trackUrl) ?? { up: 0, down: 0 }) };
-        if (previous === 1) tally.up -= 1;
-        if (previous === -1) tally.down -= 1;
-        if (direction === 1) tally.up += 1;
-        else tally.down += 1;
-        next.set(trackUrl, tally);
+    // Optimistic: the count moves now, and is put back only if the write fails.
+    setMyFavorites((current) => new Set(current).add(trackUrl));
+    setCounts((current) => new Map(current).set(trackUrl, (current.get(trackUrl) ?? 0) + 1));
+
+    void favoriteTrack({
+      roomId: schedule.roomId,
+      trackUrl,
+      listenerId: listener.id,
+    }).then((outcome) => {
+      // 'unchanged' means the row was already there — a favourite this browser
+      // made before the page knew about it. Leave the optimistic state alone.
+      if (outcome !== 'failed') return;
+      setMyFavorites((current) => {
+        const next = new Set(current);
+        next.delete(trackUrl);
         return next;
       });
-
-      void castVote({
-        roomId: schedule.roomId,
-        trackUrl,
-        listenerId: listener.id,
-        direction,
-      }).then((outcome) => {
-        if (outcome !== 'failed') return;
-        // Put it back the way it was rather than leaving a number that is not
-        // true.
-        setMyVotes((current) => {
-          const next = new Map(current);
-          if (previous === undefined) next.delete(trackUrl);
-          else next.set(trackUrl, previous);
-          return next;
-        });
+      setCounts((current) => {
+        const next = new Map(current);
+        next.set(trackUrl, Math.max(0, (next.get(trackUrl) ?? 1) - 1));
+        return next;
       });
-    },
-    [listener, myVotes, schedule, sendHeart, track],
-  );
+    });
+  }, [listener, myFavorites, schedule, sendHeart, track]);
 
   const suggest = useCallback(
     async (input: string): Promise<SuggestionOutcome> => {
@@ -285,16 +277,15 @@ export function useRoom(roomSlug: string) {
     listeners: listeners as PresentListener[],
     hearts: hearts as HeartBurstEvent[],
 
-    votes: track === null ? { up: 0, down: 0 } : (tallies.get(track.url) ?? { up: 0, down: 0 }),
-    myVote: track === null ? undefined : myVotes.get(track.url),
+    favorites: track === null ? 0 : (counts.get(track.url) ?? 0),
+    isFavorited: track === null ? false : myFavorites.has(track.url),
     /**
-     * What this listener has voted up, newest schedule order. Titles come from
-     * the schedule where it knows them; a track voted up under an older
+     * What this listener has favourited, in schedule order. Titles come from
+     * the schedule where it knows them; a track favourited under an older
      * schedule is still shown, by its link.
      */
-    likedTracks: [...myVotes.entries()]
-      .filter(([, direction]) => direction === 1)
-      .map(([url]) => ({
+    likedTracks: [...myFavorites]
+      .map((url) => ({
         url,
         title: schedule?.tracks.find((candidate) => candidate.url === url)?.title ?? url,
         artist: schedule?.tracks.find((candidate) => candidate.url === url)?.artist ?? null,
@@ -303,7 +294,7 @@ export function useRoom(roomSlug: string) {
     iframeRef,
     tuneIn: useCallback(() => void syncRef.current?.tuneIn(), []),
     tuneOut: useCallback(() => syncRef.current?.tuneOut(), []),
-    vote,
+    favorite,
     suggest,
     setNickname,
   };
