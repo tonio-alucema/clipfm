@@ -91,8 +91,11 @@ export const MARQUEE = {
  *
  * Shared between the burst animation and the code that expires it, so the two
  * cannot drift apart and leave hearts hanging or cut them off mid-flight.
+ *
+ * Long on purpose. A burst that is gone before anyone looks up is a reaction
+ * nobody in the room got to see, which defeats the point of broadcasting it.
  */
-export const HEART_BURST_SECONDS = DURATION.slow * 2;
+export const HEART_BURST_SECONDS = DURATION.slow * 4;
 
 /**
  * A stable per-instance offset in the range [0, spread).
