@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * The heart, and what you have favourited.
+ * The heart, and what you have favorited.
  *
- * One button, because a favourite only points one way. Filled once it is
+ * One button, because a favorite only points one way. Filled once it is
  * yours and stays filled — there is no un-heart, so the pressed state is a
  * record rather than a toggle.
  */
@@ -90,7 +90,7 @@ export function FavoriteBar({ count, isMine, onFavorite, likedTracks }: Favorite
         onClick={onFavorite}
         whileTap={{ scale: 0.88 }}
         transition={SPRING.arrive}
-        aria-label="Favourite this track"
+        aria-label="Favorite this track"
         aria-pressed={isMine}
         className="flex items-center gap-1.5 rounded-full border border-room-edge py-2 pl-3.5 pr-3.5 text-sm"
         style={{ color: isMine ? 'var(--color-room-heart)' : undefined }}
@@ -99,25 +99,24 @@ export function FavoriteBar({ count, isMine, onFavorite, likedTracks }: Favorite
         <span className="tabular-nums">{count}</span>
       </motion.button>
 
-      {/* Only offered once there is something in it. */}
-      {likedTracks.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setOpen((was) => !was)}
-          aria-expanded={open}
-          aria-label={`Tracks you favourited (${likedTracks.length})`}
-          className="rounded-full border border-room-edge px-2 py-2 text-xs text-room-dim"
+      {/* Always offered, even empty. A control that only appears once you
+          have earned it is a control nobody knows is there. */}
+      <button
+        type="button"
+        onClick={() => setOpen((was) => !was)}
+        aria-expanded={open}
+        aria-label={`Tracks you favorited (${likedTracks.length})`}
+        className="rounded-full border border-room-edge px-2 py-2 text-xs text-room-dim"
+      >
+        <motion.span
+          aria-hidden
+          animate={{ rotate: open ? 180 : 0 }}
+          transition={{ duration: DURATION.quick, ease: EASE.standard }}
+          className="block"
         >
-          <motion.span
-            aria-hidden
-            animate={{ rotate: open ? 180 : 0 }}
-            transition={{ duration: DURATION.quick, ease: EASE.standard }}
-            className="block"
-          >
-            ▾
-          </motion.span>
-        </button>
-      )}
+          ▾
+        </motion.span>
+      </button>
 
       <AnimatePresence>
         {open && (
@@ -127,31 +126,39 @@ export function FavoriteBar({ count, isMine, onFavorite, likedTracks }: Favorite
             exit={{ opacity: 0, y: -6, transition: { duration: DURATION.quick, ease: EASE.exit } }}
             className="absolute right-0 top-full z-10 mt-2 max-h-64 w-72 overflow-y-auto rounded-xl border border-room-edge bg-room-floor p-1.5 shadow-xl"
           >
-            <p className="px-2.5 py-1.5 text-xs text-room-faint">You favourited</p>
-            <ul>
-              {likedTracks.map((liked) => (
-                <li key={liked.url}>
-                  <a
-                    href={liked.url}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="flex items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-sm hover:bg-room-edge"
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate">{liked.title}</span>
-                      {liked.artist !== null && (
-                        <span className="block truncate text-xs text-room-faint">
-                          {liked.artist}
-                        </span>
-                      )}
-                    </span>
-                    <span className="shrink-0 text-room-faint">
-                      <ExternalLink />
-                    </span>
-                  </a>
-                </li>
-              ))}
-            </ul>
+            {likedTracks.length === 0 ? (
+              <p className="px-2.5 py-3 text-center text-xs text-room-faint">
+                no favorited tracks yet
+              </p>
+            ) : (
+              <>
+              <p className="px-2.5 py-1.5 text-xs text-room-faint">You favorited</p>
+              <ul>
+                {likedTracks.map((liked) => (
+                  <li key={liked.url}>
+                    <a
+                      href={liked.url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="flex items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-sm hover:bg-room-edge"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate">{liked.title}</span>
+                        {liked.artist !== null && (
+                          <span className="block truncate text-xs text-room-faint">
+                            {liked.artist}
+                          </span>
+                        )}
+                      </span>
+                      <span className="shrink-0 text-room-faint">
+                        <ExternalLink />
+                      </span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+              </>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

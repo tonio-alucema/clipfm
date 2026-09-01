@@ -63,6 +63,15 @@ export const IDLE_BOB = {
 export const CONFIRM_HOLD = 1.3;
 
 /**
+ * How far the room recedes while you are tuned out.
+ *
+ * Tuning in is the whole gesture, so the difference has to be visible at a
+ * glance rather than read. Low enough to be unmistakably inert, high enough
+ * that you can still tell what is playing before you commit to hearing it.
+ */
+export const TUNED_OUT_OPACITY = 0.3;
+
+/**
  * Marquee, for text too long to fit.
  *
  * Speed is a rate, not a duration: a fixed duration makes a long title whip

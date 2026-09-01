@@ -4,7 +4,7 @@
  * The room, assembled.
  *
  * Everything Phase 0 built, wired together in one place: the server clock, the
- * live schedule, the player and sync loop, presence, hearts, and favourites.
+ * live schedule, the player and sync loop, presence, hearts, and favorites.
  * The page below this is only responsible for what it looks like.
  *
  * Order matters and is not incidental. The clock must settle before the
@@ -223,7 +223,7 @@ export function useRoom(roomSlug: string) {
       trackUrl,
       listenerId: listener.id,
     }).then((outcome) => {
-      // 'unchanged' means the row was already there — a favourite this browser
+      // 'unchanged' means the row was already there — a favorite this browser
       // made before the page knew about it. Leave the optimistic state alone.
       if (outcome !== 'failed') return;
       setMyFavorites((current) => {
@@ -280,8 +280,8 @@ export function useRoom(roomSlug: string) {
     favorites: track === null ? 0 : (counts.get(track.url) ?? 0),
     isFavorited: track === null ? false : myFavorites.has(track.url),
     /**
-     * What this listener has favourited, in schedule order. Titles come from
-     * the schedule where it knows them; a track favourited under an older
+     * What this listener has favorited, in schedule order. Titles come from
+     * the schedule where it knows them; a track favorited under an older
      * schedule is still shown, by its link.
      */
     likedTracks: [...myFavorites]

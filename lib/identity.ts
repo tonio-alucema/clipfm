@@ -35,7 +35,7 @@ export function randomNickname(random: () => number = Math.random): string {
  *
  * Listener ids are stored in a `uuid` column, so a readable id like
  * "debug-alpha" is rejected by the database — which is exactly how the
- * harness's debug listeners silently failed to favourite anything. Hashing
+ * harness's debug listeners silently failed to favorite anything. Hashing
  * the name keeps the id stable across reloads while remaining a real UUID.
  */
 export function deterministicUuid(seed: string): string {

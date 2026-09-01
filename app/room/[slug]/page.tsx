@@ -6,10 +6,14 @@
  * A dark place you tune into. Everything the room knows comes from `useRoom`;
  * this file is only responsible for how it looks.
  *
- * The SoundCloud widget is kept visible, small, at the bottom. Hiding an embed
- * is where attribution goes to die, and the audio genuinely does come from
- * there — pretending otherwise would be both dishonest and against the terms
- * the free widget is offered under.
+ * The SoundCloud widget is mounted but out of sight. Its own controls were
+ * misleading here — pausing it fights the schedule rather than the room, and
+ * the room is not a thing you pause. What the embed carried that still matters
+ * is the credit, so that moves to the mark beside the progress bar and links
+ * out to the track. Attribution is kept deliberately rather than incidentally.
+ *
+ * It is positioned off-screen rather than `display: none`: a hidden iframe can
+ * be suspended by the browser, and this one is the audio.
  */
 
 import { AnimatePresence, motion } from 'framer-motion';
@@ -19,8 +23,17 @@ import { Avatar } from '@/components/avatar';
 import { HeartBurst } from '@/components/heart-burst';
 import { MarqueeText } from '@/components/marquee-text';
 import { FavoriteBar } from '@/components/favorite-bar';
+import { SoundCloudMark } from '@/components/soundcloud-mark';
+import { TrackLink } from '@/components/track-link';
 import { widgetIframeSrc } from '@/lib/player/widget-api';
-import { CONFIRM_HOLD, DURATION, EASE, SPRING, jitter } from '@/lib/motion';
+import {
+  CONFIRM_HOLD,
+  DURATION,
+  EASE,
+  SPRING,
+  TUNED_OUT_OPACITY,
+  jitter,
+} from '@/lib/motion';
 import { useRoom } from '@/lib/room/use-room';
 import type { SuggestionOutcome } from '@/lib/suggestions/suggestions';
 import { DEFAULT_ROOM_SLUG } from '@/lib/rooms';
@@ -44,8 +57,9 @@ export default function RoomPage() {
     if (collapseRef.current !== null) clearTimeout(collapseRef.current);
   }, []);
 
-  // The buttons sit near the bottom, so the input it reveals opens off-screen
-  // on a phone — a field you cannot see is a field nobody fills in.
+  // The field opens above the buttons, so it is in view already — but a phone
+  // keyboard covers the lower third once it is focused, which puts it back
+  // off-screen. Scrolling it up is for the keyboard, not the layout.
   useEffect(() => {
     if (!requesting) return;
     requestRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -54,17 +68,35 @@ export default function RoomPage() {
   const progress =
     room.track === null ? 0 : Math.min(1, room.offsetMs / room.track.durationMs);
 
+  // Contended is not tuned in, whatever the player thinks — the same reading
+  // the buttons use, so the room never contradicts its own controls.
+  const live = room.tunedIn && !room.contended;
+
+  // What is playing recedes while you are out and comes up when you join. The
+  // heart is deliberately not in here: it stays available either way, and
+  // dimming an action makes it look disabled.
+  const recede = {
+    animate: { opacity: live ? 1 : TUNED_OUT_OPACITY },
+    transition: { duration: DURATION.slow, ease: EASE.enter },
+  } as const;
+
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col px-5 pb-6 pt-10">
-      <header className="mb-8 flex items-baseline justify-between">
+      {/* The heart lives up here, away from what it is about. It applies to
+          whatever is playing, and putting it on the title row made it read as
+          part of the track rather than as something you do. */}
+      <header className="mb-8 flex items-center justify-between gap-4">
         <h1 className="text-sm font-medium tracking-widest text-room-dim uppercase">
           {room.roomName}
         </h1>
-        <span className="text-xs text-room-faint">
-          {room.listeners.length === 0
-            ? 'nobody here'
-            : `${room.listeners.length} listening`}
-        </span>
+        {room.phase === 'ready' && (
+          <FavoriteBar
+            count={room.favorites}
+            isMine={room.isFavorited}
+            onFavorite={room.favorite}
+            likedTracks={room.likedTracks}
+          />
+        )}
       </header>
 
       {room.phase === 'connecting' && (
@@ -89,7 +121,7 @@ export default function RoomPage() {
           {/* Now playing ------------------------------------------------ */}
           <section>
             <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
+              <motion.div {...recede} className="min-w-0 flex-1">
                 {/* Scrolls itself only when the title does not fit. Keyed on
                     the title so a track change starts it over rather than
                     resuming mid-scroll on different words. */}
@@ -99,19 +131,20 @@ export default function RoomPage() {
                   className="text-lg font-medium"
                 />
                 <p className="truncate text-sm text-room-dim">{room.track?.artist ?? ''}</p>
-              </div>
+              </motion.div>
 
-              <FavoriteBar
-                count={room.favorites}
-                isMine={room.isFavorited}
-                onFavorite={room.favorite}
-                likedTracks={room.likedTracks}
-              />
+              {/* Stays with the title because it goes to this track
+                  specifically. Not dimmed with the room: you can look a track
+                  up without listening to it. */}
+              <TrackLink href={room.track?.url ?? null} />
             </div>
 
             {/* Everyone is at the same point in this bar, which is the whole
                 idea. It is drawn from the schedule, not from the player. */}
-            <div className="mt-4 flex items-center gap-3 text-xs tabular-nums text-room-faint">
+            <motion.div
+              {...recede}
+              className="mt-4 flex items-center gap-2.5 text-xs tabular-nums text-room-faint"
+            >
               <span>{clock(room.offsetMs)}</span>
               <div className="h-0.5 flex-1 overflow-hidden rounded-full bg-room-edge">
                 <div
@@ -120,11 +153,15 @@ export default function RoomPage() {
                 />
               </div>
               <span>{clock(room.track?.durationMs ?? 0)}</span>
-            </div>
+              <SoundCloudMark />
+            </motion.div>
 
             {/* A quarter of the width, centred. The room is about the people;
                 the record sleeve is context, not the subject. */}
-            <div className="mx-auto mt-7 aspect-square w-1/4 overflow-hidden rounded-2xl bg-room-floor">
+            <motion.div
+              {...recede}
+              className="mx-auto mt-7 aspect-square w-1/4 overflow-hidden rounded-2xl bg-room-floor"
+            >
               <AnimatePresence mode="popLayout">
                 {room.track?.artwork != null && (
                   <motion.img
@@ -145,7 +182,7 @@ export default function RoomPage() {
                   />
                 )}
               </AnimatePresence>
-            </div>
+            </motion.div>
           </section>
 
           {/* The room --------------------------------------------------- */}
@@ -182,60 +219,20 @@ export default function RoomPage() {
             </ul>
           </section>
 
+          {/* Bottom-anchored, and the order is deliberate: the buttons are
+              the one thing that never moves. Status sits above them, and the
+              request field opens between the two — so revealing it nudges the
+              status up rather than pushing the buttons off under a thumb. */}
           <div className="pt-8">
-            {/* Tune in needs a real gesture, and mobile only unlocks audio from
-                inside one — so the button stays disabled until there is a
-                player to receive it. */}
-            <div className="flex items-center justify-center gap-3">
-              {room.tunedIn && !room.contended ? (
-                <motion.button
-                  type="button"
-                  onClick={room.tuneOut}
-                  whileTap={{ scale: 0.97 }}
-                  transition={SPRING.arrive}
-                  className="rounded-full border-2 border-room-ink px-12 py-5 text-sm font-medium text-room-ink"
-                >
-                  Tune out
-                </motion.button>
-              ) : (
-                <motion.button
-                  type="button"
-                  onClick={room.tuneIn}
-                  disabled={!room.ready}
-                  whileTap={{ scale: room.ready ? 0.97 : 1 }}
-                  transition={SPRING.arrive}
-                  className="rounded-full bg-room-ink px-12 py-5 text-sm font-medium text-room-void disabled:opacity-40"
-                >
-                  {!room.ready ? 'Getting ready…' : room.contended ? 'Try again' : 'Tune in'}
-                </motion.button>
-              )}
-
-              <motion.button
-                type="button"
-                onClick={() => {
-                  setRequestResult(null);
-                  setRequesting((was) => !was);
-                }}
-                whileTap={{ scale: 0.97 }}
-                transition={SPRING.arrive}
-                aria-expanded={requesting}
-                className="rounded-full border border-room-edge px-6 py-5 text-sm font-medium text-room-dim"
-              >
-                Request track
-              </motion.button>
-            </div>
-
-            {room.tunedIn && !room.contended && (
-              <p className="mt-2 text-center text-xs text-room-faint">
-                {room.unavailable
-                  ? 'this track will not play here'
-                  : room.playerState === 'stalled'
-                    ? 'catching up…'
-                    : 'tuned in'}
+            {/* No "tuned in" — the room coming up to full says that. What is
+                left is only what opacity cannot tell you. */}
+            {live && (room.unavailable || room.playerState === 'stalled') && (
+              <p className="mb-3 text-center text-xs text-room-faint">
+                {room.unavailable ? 'this track will not play here' : 'catching up…'}
               </p>
             )}
             {room.contended && (
-              <p className="mt-2 text-center text-xs text-room-faint">
+              <p className="mb-3 text-center text-xs text-room-faint">
                 Playback would not start. If the room is open in another tab, close it.
               </p>
             )}
@@ -244,15 +241,17 @@ export default function RoomPage() {
               {requesting && (
                 <motion.form
                   ref={requestRef}
-                  initial={{ opacity: 0, height: 0 }}
+                  initial={{ opacity: 0, height: 0, y: 12 }}
                   animate={{
                     opacity: 1,
                     height: 'auto',
+                    y: 0,
                     transition: { duration: DURATION.normal, ease: EASE.enter },
                   }}
                   exit={{
                     opacity: 0,
                     height: 0,
+                    y: 12,
                     transition: { duration: DURATION.quick, ease: EASE.exit },
                   }}
                   className="overflow-hidden"
@@ -274,24 +273,24 @@ export default function RoomPage() {
                     });
                   }}
                 >
-                  <div className="mt-4 flex gap-2">
+                  <div className="mb-4 flex gap-2">
                     <input
                       value={request}
                       onChange={(event) => {
                         setRequest(event.target.value);
                         setRequestResult(null);
                       }}
-                      placeholder="paste soundcloud link here"
+                      placeholder="paste Soundcloud track link here"
                       aria-label="SoundCloud track link"
                       inputMode="url"
-                      className="min-w-0 flex-1 rounded-full border border-room-edge bg-room-floor px-4 py-3 text-sm text-room-ink placeholder:text-room-faint"
+                      className="min-w-0 flex-1 rounded-full border border-room-edge bg-room-floor px-3.5 py-3 text-sm text-room-ink placeholder:text-room-faint"
                     />
                     <motion.button
                       layout
                       transition={SPRING.arrive}
                       type="submit"
                       disabled={sent || request.trim().length === 0}
-                      className="flex items-center justify-center rounded-full bg-room-ink px-5 py-3 text-sm font-medium text-room-void disabled:opacity-40"
+                      className="flex items-center justify-center rounded-full bg-room-ink px-4 py-3 text-sm font-medium text-room-void disabled:opacity-40"
                     >
                       <AnimatePresence mode="wait" initial={false}>
                         {sent ? (
@@ -335,25 +334,77 @@ export default function RoomPage() {
                       </AnimatePresence>
                     </motion.button>
                   </div>
-                  <p className="mt-2 text-center text-xs text-room-faint">
-                    {requestResult === 'saved' && 'Sent — it is up to the curator now.'}
-                    {requestResult === 'already' && 'You have already asked for that one.'}
-                    {requestResult === 'invalid' &&
-                      'That is not a SoundCloud track link. A set or a profile will not play here.'}
-                    {requestResult === 'failed' && 'Could not send that. Try again in a moment.'}
-                    {requestResult === null && 'A link to a single track, not a playlist.'}
-                  </p>
+                  {/* Only when something went wrong. The guidance lives in the
+                      field now, and a success is already answered by the
+                      checkmark and the form closing itself. */}
+                  {requestResult !== null && requestResult !== 'saved' && (
+                    <p className="mb-4 text-center text-xs text-room-faint">
+                      {requestResult === 'already' && 'You have already asked for that one.'}
+                      {requestResult === 'invalid' &&
+                        'That is not a SoundCloud track link. A set or a profile will not play here.'}
+                      {requestResult === 'failed' && 'Could not send that. Try again in a moment.'}
+                    </p>
+                  )}
                 </motion.form>
               )}
             </AnimatePresence>
+
+            {/* Tune in needs a real gesture, and mobile only unlocks audio from
+                inside one — so the button stays disabled until there is a
+                player to receive it. */}
+            <div className="flex items-center justify-center gap-3">
+              {room.tunedIn && !room.contended ? (
+                <motion.button
+                  type="button"
+                  onClick={room.tuneOut}
+                  whileTap={{ scale: 0.97 }}
+                  transition={SPRING.arrive}
+                  className="rounded-full px-12 py-5 text-sm font-medium text-room-ink shadow-[inset_0_0_0_2px_var(--color-room-ink)]"
+                >
+                  Tune out
+                </motion.button>
+              ) : (
+                <motion.button
+                  type="button"
+                  onClick={room.tuneIn}
+                  disabled={!room.ready}
+                  whileTap={{ scale: room.ready ? 0.97 : 1 }}
+                  transition={SPRING.arrive}
+                  className="rounded-full bg-room-ink px-12 py-5 text-sm font-medium text-room-void disabled:opacity-40"
+                >
+                  {!room.ready ? 'fake id check' : room.contended ? 'Try again' : 'Tune in'}
+                </motion.button>
+              )}
+
+              <motion.button
+                type="button"
+                onClick={() => {
+                  setRequestResult(null);
+                  setRequesting((was) => !was);
+                }}
+                whileTap={{ scale: 0.97 }}
+                transition={SPRING.arrive}
+                aria-expanded={requesting}
+                className="rounded-full border border-room-edge px-6 py-5 text-sm font-medium text-room-dim"
+              >
+                Request
+              </motion.button>
+            </div>
           </div>
+
         </>
       )}
 
-      {/* Kept visible and small: this is where the audio actually comes from,
-          and where SoundCloud's attribution lives. */}
+      {/* Out of sight, still playing. Off-screen rather than hidden: a
+          `display: none` iframe is a candidate for suspension, and this one is
+          the only thing making sound. Credit lives on the mark up by the
+          progress bar. */}
       {room.setUrl !== null && (
-        <div className="mt-6 overflow-hidden rounded-lg opacity-40">
+        <div
+          aria-hidden
+          className="pointer-events-none fixed top-0 h-px w-px overflow-hidden opacity-0"
+          style={{ left: '-9999px' }}
+        >
           <iframe
             ref={room.iframeRef}
             title="SoundCloud player"

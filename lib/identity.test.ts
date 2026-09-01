@@ -6,7 +6,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 describe('deterministicUuid', () => {
   // listener_id is a uuid column, so a readable id like "debug-alpha" is
   // rejected outright — which is how debug listeners silently failed to
-  // favourite anything.
+  // favorite anything.
   it('produces a well-formed v4-shaped uuid', () => {
     for (const seed of ['alpha', 'beta', '', 'a much longer seed 🎧']) {
       expect(deterministicUuid(seed)).toMatch(UUID);
