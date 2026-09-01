@@ -153,7 +153,7 @@ export default function RoomPage() {
                 />
               </div>
               <span>{clock(room.track?.durationMs ?? 0)}</span>
-              <SoundCloudMark href={room.track?.url ?? null} />
+              <SoundCloudMark />
             </motion.div>
 
             {/* A quarter of the width, centred. The room is about the people;
