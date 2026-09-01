@@ -82,10 +82,21 @@ export default function RoomPage() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col px-5 pb-6 pt-10">
-      <header className="mb-8">
+      {/* The heart lives up here, away from what it is about. It applies to
+          whatever is playing, and putting it on the title row made it read as
+          part of the track rather than as something you do. */}
+      <header className="mb-8 flex items-center justify-between gap-4">
         <h1 className="text-sm font-medium tracking-widest text-room-dim uppercase">
           {room.roomName}
         </h1>
+        {room.phase === 'ready' && (
+          <FavoriteBar
+            count={room.favorites}
+            isMine={room.isFavorited}
+            onFavorite={room.favorite}
+            likedTracks={room.likedTracks}
+          />
+        )}
       </header>
 
       {room.phase === 'connecting' && (
@@ -122,17 +133,10 @@ export default function RoomPage() {
                 <p className="truncate text-sm text-room-dim">{room.track?.artist ?? ''}</p>
               </motion.div>
 
-              {/* Actions about what is playing, grouped. Neither recedes with
-                  the room — both stay available while you are tuned out. */}
-              <div className="flex shrink-0 items-center gap-2">
-                <TrackLink href={room.track?.url ?? null} />
-                <FavoriteBar
-                  count={room.favorites}
-                  isMine={room.isFavorited}
-                  onFavorite={room.favorite}
-                  likedTracks={room.likedTracks}
-                />
-              </div>
+              {/* Stays with the title because it goes to this track
+                  specifically. Not dimmed with the room: you can look a track
+                  up without listening to it. */}
+              <TrackLink href={room.track?.url ?? null} />
             </div>
 
             {/* Everyone is at the same point in this bar, which is the whole
