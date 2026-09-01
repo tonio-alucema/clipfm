@@ -24,6 +24,7 @@ import { HeartBurst } from '@/components/heart-burst';
 import { MarqueeText } from '@/components/marquee-text';
 import { FavoriteBar } from '@/components/favorite-bar';
 import { SoundCloudMark } from '@/components/soundcloud-mark';
+import { TrackLink } from '@/components/track-link';
 import { widgetIframeSrc } from '@/lib/player/widget-api';
 import {
   CONFIRM_HOLD,
@@ -121,12 +122,17 @@ export default function RoomPage() {
                 <p className="truncate text-sm text-room-dim">{room.track?.artist ?? ''}</p>
               </motion.div>
 
-              <FavoriteBar
-                count={room.favorites}
-                isMine={room.isFavorited}
-                onFavorite={room.favorite}
-                likedTracks={room.likedTracks}
-              />
+              {/* Actions about what is playing, grouped. Neither recedes with
+                  the room — both stay available while you are tuned out. */}
+              <div className="flex shrink-0 items-center gap-2">
+                <TrackLink href={room.track?.url ?? null} />
+                <FavoriteBar
+                  count={room.favorites}
+                  isMine={room.isFavorited}
+                  onFavorite={room.favorite}
+                  likedTracks={room.likedTracks}
+                />
+              </div>
             </div>
 
             {/* Everyone is at the same point in this bar, which is the whole
@@ -270,10 +276,10 @@ export default function RoomPage() {
                         setRequest(event.target.value);
                         setRequestResult(null);
                       }}
-                      placeholder="paste single track soundcloud link here"
+                      placeholder="paste Soundcloud track link here"
                       aria-label="SoundCloud track link"
                       inputMode="url"
-                      className="min-w-0 flex-1 rounded-full border border-room-edge bg-room-floor px-3.5 py-3 text-sm text-room-ink placeholder:text-xs placeholder:text-room-faint sm:placeholder:text-sm"
+                      className="min-w-0 flex-1 rounded-full border border-room-edge bg-room-floor px-3.5 py-3 text-sm text-room-ink placeholder:text-room-faint"
                     />
                     <motion.button
                       layout
@@ -362,7 +368,7 @@ export default function RoomPage() {
                   transition={SPRING.arrive}
                   className="rounded-full bg-room-ink px-12 py-5 text-sm font-medium text-room-void disabled:opacity-40"
                 >
-                  {!room.ready ? 'checking your fake ID' : room.contended ? 'Try again' : 'Tune in'}
+                  {!room.ready ? 'fake id check' : room.contended ? 'Try again' : 'Tune in'}
                 </motion.button>
               )}
 
@@ -377,7 +383,7 @@ export default function RoomPage() {
                 aria-expanded={requesting}
                 className="rounded-full border border-room-edge px-6 py-5 text-sm font-medium text-room-dim"
               >
-                Request track
+                Request
               </motion.button>
             </div>
           </div>
