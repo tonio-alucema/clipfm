@@ -25,7 +25,14 @@ import { MarqueeText } from '@/components/marquee-text';
 import { FavoriteBar } from '@/components/favorite-bar';
 import { SoundCloudMark } from '@/components/soundcloud-mark';
 import { widgetIframeSrc } from '@/lib/player/widget-api';
-import { CONFIRM_HOLD, DURATION, EASE, SPRING, jitter } from '@/lib/motion';
+import {
+  CONFIRM_HOLD,
+  DURATION,
+  EASE,
+  SPRING,
+  TUNED_OUT_OPACITY,
+  jitter,
+} from '@/lib/motion';
 import { useRoom } from '@/lib/room/use-room';
 import type { SuggestionOutcome } from '@/lib/suggestions/suggestions';
 import { DEFAULT_ROOM_SLUG } from '@/lib/rooms';
@@ -60,17 +67,24 @@ export default function RoomPage() {
   const progress =
     room.track === null ? 0 : Math.min(1, room.offsetMs / room.track.durationMs);
 
+  // Contended is not tuned in, whatever the player thinks — the same reading
+  // the buttons use, so the room never contradicts its own controls.
+  const live = room.tunedIn && !room.contended;
+
+  // What is playing recedes while you are out and comes up when you join. The
+  // heart is deliberately not in here: it stays available either way, and
+  // dimming an action makes it look disabled.
+  const recede = {
+    animate: { opacity: live ? 1 : TUNED_OUT_OPACITY },
+    transition: { duration: DURATION.slow, ease: EASE.enter },
+  } as const;
+
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col px-5 pb-6 pt-10">
-      <header className="mb-8 flex items-baseline justify-between">
+      <header className="mb-8">
         <h1 className="text-sm font-medium tracking-widest text-room-dim uppercase">
           {room.roomName}
         </h1>
-        <span className="text-xs text-room-faint">
-          {room.listeners.length === 0
-            ? 'nobody here'
-            : `${room.listeners.length} listening`}
-        </span>
       </header>
 
       {room.phase === 'connecting' && (
@@ -95,7 +109,7 @@ export default function RoomPage() {
           {/* Now playing ------------------------------------------------ */}
           <section>
             <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
+              <motion.div {...recede} className="min-w-0 flex-1">
                 {/* Scrolls itself only when the title does not fit. Keyed on
                     the title so a track change starts it over rather than
                     resuming mid-scroll on different words. */}
@@ -105,7 +119,7 @@ export default function RoomPage() {
                   className="text-lg font-medium"
                 />
                 <p className="truncate text-sm text-room-dim">{room.track?.artist ?? ''}</p>
-              </div>
+              </motion.div>
 
               <FavoriteBar
                 count={room.favorites}
@@ -117,7 +131,10 @@ export default function RoomPage() {
 
             {/* Everyone is at the same point in this bar, which is the whole
                 idea. It is drawn from the schedule, not from the player. */}
-            <div className="mt-4 flex items-center gap-2.5 text-xs tabular-nums text-room-faint">
+            <motion.div
+              {...recede}
+              className="mt-4 flex items-center gap-2.5 text-xs tabular-nums text-room-faint"
+            >
               <span>{clock(room.offsetMs)}</span>
               <div className="h-0.5 flex-1 overflow-hidden rounded-full bg-room-edge">
                 <div
@@ -127,11 +144,14 @@ export default function RoomPage() {
               </div>
               <span>{clock(room.track?.durationMs ?? 0)}</span>
               <SoundCloudMark href={room.track?.url ?? null} />
-            </div>
+            </motion.div>
 
             {/* A quarter of the width, centred. The room is about the people;
                 the record sleeve is context, not the subject. */}
-            <div className="mx-auto mt-7 aspect-square w-1/4 overflow-hidden rounded-2xl bg-room-floor">
+            <motion.div
+              {...recede}
+              className="mx-auto mt-7 aspect-square w-1/4 overflow-hidden rounded-2xl bg-room-floor"
+            >
               <AnimatePresence mode="popLayout">
                 {room.track?.artwork != null && (
                   <motion.img
@@ -152,7 +172,7 @@ export default function RoomPage() {
                   />
                 )}
               </AnimatePresence>
-            </div>
+            </motion.div>
           </section>
 
           {/* The room --------------------------------------------------- */}
@@ -194,13 +214,11 @@ export default function RoomPage() {
               request field opens between the two — so revealing it nudges the
               status up rather than pushing the buttons off under a thumb. */}
           <div className="pt-8">
-            {room.tunedIn && !room.contended && (
+            {/* No "tuned in" — the room coming up to full says that. What is
+                left is only what opacity cannot tell you. */}
+            {live && (room.unavailable || room.playerState === 'stalled') && (
               <p className="mb-3 text-center text-xs text-room-faint">
-                {room.unavailable
-                  ? 'this track will not play here'
-                  : room.playerState === 'stalled'
-                    ? 'catching up…'
-                    : 'tuned in'}
+                {room.unavailable ? 'this track will not play here' : 'catching up…'}
               </p>
             )}
             {room.contended && (
@@ -252,7 +270,7 @@ export default function RoomPage() {
                         setRequest(event.target.value);
                         setRequestResult(null);
                       }}
-                      placeholder="paste soundcloud link here"
+                      placeholder="paste soundcloud (single track not playlist) here"
                       aria-label="SoundCloud track link"
                       inputMode="url"
                       className="min-w-0 flex-1 rounded-full border border-room-edge bg-room-floor px-4 py-3 text-sm text-room-ink placeholder:text-room-faint"
@@ -306,14 +324,17 @@ export default function RoomPage() {
                       </AnimatePresence>
                     </motion.button>
                   </div>
-                  <p className="mb-4 text-center text-xs text-room-faint">
-                    {requestResult === 'saved' && 'Sent — it is up to the curator now.'}
-                    {requestResult === 'already' && 'You have already asked for that one.'}
-                    {requestResult === 'invalid' &&
-                      'That is not a SoundCloud track link. A set or a profile will not play here.'}
-                    {requestResult === 'failed' && 'Could not send that. Try again in a moment.'}
-                    {requestResult === null && 'A link to a single track, not a playlist.'}
-                  </p>
+                  {/* Only when something went wrong. The guidance lives in the
+                      field now, and a success is already answered by the
+                      checkmark and the form closing itself. */}
+                  {requestResult !== null && requestResult !== 'saved' && (
+                    <p className="mb-4 text-center text-xs text-room-faint">
+                      {requestResult === 'already' && 'You have already asked for that one.'}
+                      {requestResult === 'invalid' &&
+                        'That is not a SoundCloud track link. A set or a profile will not play here.'}
+                      {requestResult === 'failed' && 'Could not send that. Try again in a moment.'}
+                    </p>
+                  )}
                 </motion.form>
               )}
             </AnimatePresence>
@@ -328,7 +349,7 @@ export default function RoomPage() {
                   onClick={room.tuneOut}
                   whileTap={{ scale: 0.97 }}
                   transition={SPRING.arrive}
-                  className="rounded-full border-2 border-room-ink px-12 py-5 text-sm font-medium text-room-ink"
+                  className="rounded-full px-12 py-5 text-sm font-medium text-room-ink shadow-[inset_0_0_0_2px_var(--color-room-ink)]"
                 >
                   Tune out
                 </motion.button>
@@ -341,7 +362,7 @@ export default function RoomPage() {
                   transition={SPRING.arrive}
                   className="rounded-full bg-room-ink px-12 py-5 text-sm font-medium text-room-void disabled:opacity-40"
                 >
-                  {!room.ready ? 'Getting ready…' : room.contended ? 'Try again' : 'Tune in'}
+                  {!room.ready ? 'checking your fake ID' : room.contended ? 'Try again' : 'Tune in'}
                 </motion.button>
               )}
 
