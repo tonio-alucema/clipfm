@@ -9,7 +9,7 @@
  *
  * Nothing here writes a row. Presence and bursts are both ephemeral: a closed
  * tab leaves no trace, and a heart thrown before you arrived is simply gone.
- * The durable half of a favourite lives in lib/favorites.
+ * The durable half of a favorite lives in lib/favorites.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';

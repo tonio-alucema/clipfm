@@ -1,14 +1,14 @@
 /**
- * Favouriting a track.
+ * Favoriting a track.
  *
- * A favourite is a fact, not an event — "this listener liked this track" — so
+ * A favorite is a fact, not an event — "this listener liked this track" — so
  * it is one row per listener per track, asserted once and never rewritten. The
  * visual burst is broadcast separately and never written; see the room channel.
  *
  * There is deliberately no update and no delete. The unique constraint alone
  * makes a second tap idempotent, which is why the insert is plain rather than
  * an upsert, and it means no privilege exists that would let one listener
- * alter another's row. The trade is that a favourite cannot be taken back.
+ * alter another's row. The trade is that a favorite cannot be taken back.
  * That is the intended shape: the curator reads this to find more of what the
  * room likes, and an un-heart would be a different, noisier signal.
  */
@@ -21,7 +21,7 @@ const UNIQUE_VIOLATION = '23505';
 
 /**
  * A repeat tap collides with the unique constraint, and that is success, not
- * failure — the listener's favourite is already recorded. Only a genuinely
+ * failure — the listener's favorite is already recorded. Only a genuinely
  * unexpected error counts as failed.
  */
 export function outcomeForError(error: { code?: string | undefined } | null): FavoriteOutcome {
@@ -36,7 +36,7 @@ export type FavoriteRequest = {
 };
 
 /**
- * Never throws. A favourite that fails to persist must not break the room or
+ * Never throws. A favorite that fails to persist must not break the room or
  * retract the burst the listener already saw.
  */
 export async function favoriteTrack(request: FavoriteRequest): Promise<FavoriteOutcome> {
@@ -52,7 +52,7 @@ export async function favoriteTrack(request: FavoriteRequest): Promise<FavoriteO
   return outcomeForError(error);
 }
 
-/** How many listeners have favourited each track in the room. */
+/** How many listeners have favorited each track in the room. */
 export async function fetchFavoriteCounts(roomId: string): Promise<Map<string, number>> {
   const supabase = getSupabase();
   const counts = new Map<string, number>();
@@ -72,7 +72,7 @@ export async function fetchFavoriteCounts(roomId: string): Promise<Map<string, n
   return counts;
 }
 
-/** Which tracks this listener has favourited, so the button can show it. */
+/** Which tracks this listener has favorited, so the button can show it. */
 export async function fetchMyFavorites(
   roomId: string,
   listenerId: string,

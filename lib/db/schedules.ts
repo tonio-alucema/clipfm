@@ -12,7 +12,7 @@ import { getSupabase } from './client';
 
 export type LiveSchedule = {
   scheduleId: string;
-  /** Favourites reference the room by id, not by slug. */
+  /** Favorites reference the room by id, not by slug. */
   roomId: string;
   roomSlug: string;
   roomName: string;

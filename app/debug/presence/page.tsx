@@ -6,7 +6,7 @@
  * Deliberately has no audio. The widget only lets one instance per browser
  * make sound, which would make a multi-tab test unreadable for reasons that
  * have nothing to do with presence or reactions. What is playing is computed
- * from the schedule, which is all favouriting needs to know.
+ * from the schedule, which is all favoriting needs to know.
  *
  * ?room=<slug>  use a room other than "main".
  * ?as=<name>    act as a distinct, unsaved listener. Tabs in one browser share
@@ -97,7 +97,7 @@ export default function RoomHarness() {
     now,
   });
 
-  // What the schedule says is playing. No player, no audio — favouriting only
+  // What the schedule says is playing. No player, no audio — favoriting only
   // needs to know which track, not to hear it.
   useEffect(() => {
     if (schedule === null) return;
@@ -190,7 +190,7 @@ export default function RoomHarness() {
 
       <p>
         <button type="button" onClick={throwHeart} disabled={track === null}>
-          ♥ Favourite
+          ♥ Favorite
         </button>{' '}
         {outcome === null ? null : (
           <small>
@@ -203,7 +203,7 @@ export default function RoomHarness() {
       <p>
         <small>
           The heart is instant and never waits on the database. Tapping again re-throws the
-          burst without writing a second row — a favourite is a fact, not an event.
+          burst without writing a second row — a favorite is a fact, not an event.
         </small>
       </p>
 
