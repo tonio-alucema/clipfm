@@ -382,7 +382,7 @@ export default function RoomPage() {
                   transition={SPRING.arrive}
                   className="rounded-full bg-room-ink px-12 py-5 text-sm font-medium text-room-void disabled:opacity-40"
                 >
-                  {!room.ready ? 'fake id check' : room.contended ? 'Try again' : 'Tune in'}
+                  {!room.ready ? 'checking fake id…' : room.contended ? 'Try again' : 'Tune in'}
                 </motion.button>
               )}
 
