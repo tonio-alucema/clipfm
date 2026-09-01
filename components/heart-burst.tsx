@@ -36,7 +36,19 @@ export function HeartBurst({ id, origin }: HeartBurstProps) {
         x: drift,
         scale,
         rotate: tilt,
-        transition: { duration: HEART_BURST_SECONDS, ease: EASE.exit, times: [0, 0.12, 0.6, 1] },
+        // Decelerating, not accelerating. A heart is a thing leaving, which
+        // normally argues for EASE.exit — but over this long an accelerating
+        // curve reads as hanging still and then darting off. Rising quickly
+        // and settling into a drift is what a released thing actually does.
+        //
+        // The opacity stops are pulled earlier so the burst still appears at
+        // once: it fades in over ~0.14s and spends the rest of its life
+        // fading out.
+        transition: {
+          duration: HEART_BURST_SECONDS,
+          ease: EASE.enter,
+          times: [0, 0.06, 0.55, 1],
+        },
       }}
       style={{
         position: 'absolute',

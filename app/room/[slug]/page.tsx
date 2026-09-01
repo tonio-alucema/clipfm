@@ -24,7 +24,6 @@ import { HeartBurst } from '@/components/heart-burst';
 import { MarqueeText } from '@/components/marquee-text';
 import { FavoriteBar } from '@/components/favorite-bar';
 import { SoundCloudMark } from '@/components/soundcloud-mark';
-import { TrackLink } from '@/components/track-link';
 import { widgetIframeSrc } from '@/lib/player/widget-api';
 import {
   CONFIRM_HOLD,
@@ -82,10 +81,7 @@ export default function RoomPage() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col px-5 pb-6 pt-10">
-      {/* The heart lives up here, away from what it is about. It applies to
-          whatever is playing, and putting it on the title row made it read as
-          part of the track rather than as something you do. */}
-      <header className="mb-8 flex items-center justify-between gap-4">
+      <header className="mb-8">
         {/* The mark, not the room name. They happen to be the same words
             today, but the logo is the product and the name is data — if a
             second room is ever added, this should not silently rename it. */}
@@ -99,14 +95,6 @@ export default function RoomPage() {
             className="block h-[44px] w-auto"
           />
         </h1>
-        {room.phase === 'ready' && (
-          <FavoriteBar
-            count={room.favorites}
-            isMine={room.isFavorited}
-            onFavorite={room.favorite}
-            likedTracks={room.likedTracks}
-          />
-        )}
       </header>
 
       {room.phase === 'connecting' && (
@@ -130,7 +118,16 @@ export default function RoomPage() {
         <>
           {/* Now playing ------------------------------------------------ */}
           <section>
-            <div className="flex items-start justify-between gap-4">
+            {/* Its own row, so the heart centres against the title and artist
+                rather than against the label above them. */}
+            <motion.p
+              {...recede}
+              className="mb-1 text-[10px] font-medium uppercase tracking-widest text-room-faint"
+            >
+              now playing
+            </motion.p>
+
+            <div className="flex items-center justify-between gap-4">
               <motion.div {...recede} className="min-w-0 flex-1">
                 {/* Scrolls itself only when the title does not fit. Keyed on
                     the title so a track change starts it over rather than
@@ -138,15 +135,19 @@ export default function RoomPage() {
                 <MarqueeText
                   key={room.track?.url ?? 'none'}
                   text={room.track?.title ?? '—'}
-                  className="text-lg font-medium"
+                  className="text-base font-medium"
                 />
                 <p className="truncate text-sm text-room-dim">{room.track?.artist ?? ''}</p>
               </motion.div>
 
-              {/* Stays with the title because it goes to this track
-                  specifically. Not dimmed with the room: you can look a track
-                  up without listening to it. */}
-              <TrackLink href={room.track?.url ?? null} />
+              {/* Not dimmed with the room: favoriting stays available whether
+                  or not you are listening. */}
+              <FavoriteBar
+                count={room.favorites}
+                isMine={room.isFavorited}
+                onFavorite={room.favorite}
+                likedTracks={room.likedTracks}
+              />
             </div>
 
             {/* Everyone is at the same point in this bar, which is the whole
@@ -163,7 +164,7 @@ export default function RoomPage() {
                 />
               </div>
               <span>{clock(room.track?.durationMs ?? 0)}</span>
-              <SoundCloudMark />
+              <SoundCloudMark href={room.track?.url ?? null} />
             </motion.div>
 
             {/* A quarter of the width, centred. The room is about the people;
@@ -400,6 +401,20 @@ export default function RoomPage() {
                 Request
               </motion.button>
             </div>
+
+            {/* Last thing on the page and quiet enough to be ignored, which is
+                what a signature should be. */}
+            <p className="mt-4 text-center text-[9px] text-room-faint">
+              made with ❤️ by{' '}
+              <a
+                href="https://x.com/tonioalucema"
+                target="_blank"
+                rel="noreferrer noopener"
+                className="underline decoration-room-edge underline-offset-2 transition-colors hover:text-room-dim"
+              >
+                Tonio Alucema
+              </a>
+            </p>
           </div>
 
         </>

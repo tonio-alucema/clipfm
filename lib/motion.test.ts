@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DURATION, EASE, jitter } from './motion';
+import { DURATION, EASE, HEART_BURST_SECONDS, jitter } from './motion';
 
 describe('jitter', () => {
   it('is stable for a given seed, so a re-render never reshuffles the room', () => {
@@ -41,5 +41,19 @@ describe('tokens', () => {
       expect(curve[2]).toBeGreaterThanOrEqual(0);
       expect(curve[2]).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+describe('HEART_BURST_SECONDS', () => {
+  // The burst animation and the timer that removes the heart both read this.
+  // If the removal ever fires first, hearts get cut off mid-flight — so the
+  // relationship matters more than the number.
+  it('leaves the removal timer a margin over the animation', () => {
+    const lifetimeMs = HEART_BURST_SECONDS * 1000 + 200;
+    expect(lifetimeMs).toBeGreaterThan(HEART_BURST_SECONDS * 1000);
+  });
+
+  it('lasts long enough for someone to look up and see it', () => {
+    expect(HEART_BURST_SECONDS).toBeGreaterThanOrEqual(2);
   });
 });

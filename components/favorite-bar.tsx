@@ -3,9 +3,14 @@
 /**
  * The heart, and what you have favorited.
  *
- * One button, because a favorite only points one way. Filled once it is
- * yours and stays filled — there is no un-heart, so the pressed state is a
- * record rather than a toggle.
+ * One pill, two controls. The heart and the list belong to the same idea, so
+ * they share a border and a divider rather than floating as two separate
+ * buttons — but they stay separate <button>s, because tapping the heart and
+ * opening the list are different things and a single control that does both
+ * depending on where you hit it is a trap.
+ *
+ * The heart fills once it is yours and stays filled. There is no un-heart, so
+ * the pressed state is a record rather than a toggle.
  */
 
 import { AnimatePresence, motion } from 'framer-motion';
@@ -84,39 +89,45 @@ export function FavoriteBar({ count, isMine, onFavorite, likedTracks }: Favorite
   }, [open]);
 
   return (
-    <div ref={wrapRef} className="relative flex shrink-0 items-center gap-2">
-      <motion.button
-        type="button"
-        onClick={onFavorite}
-        whileTap={{ scale: 0.88 }}
-        transition={SPRING.arrive}
-        aria-label="Favorite this track"
-        aria-pressed={isMine}
-        className="flex items-center gap-1.5 rounded-full border border-room-edge py-2 pl-3.5 pr-3.5 text-sm"
-        style={{ color: isMine ? 'var(--color-room-heart)' : undefined }}
-      >
-        <Heart filled={isMine} />
-        <span className="tabular-nums">{count}</span>
-      </motion.button>
-
-      {/* Always offered, even empty. A control that only appears once you
-          have earned it is a control nobody knows is there. */}
-      <button
-        type="button"
-        onClick={() => setOpen((was) => !was)}
-        aria-expanded={open}
-        aria-label={`Tracks you favorited (${likedTracks.length})`}
-        className="rounded-full border border-room-edge px-2 py-2 text-xs text-room-dim"
-      >
-        <motion.span
-          aria-hidden
-          animate={{ rotate: open ? 180 : 0 }}
-          transition={{ duration: DURATION.quick, ease: EASE.standard }}
-          className="block"
+    <div ref={wrapRef} className="relative flex shrink-0 items-center">
+      <div className="flex items-center rounded-full border border-room-edge">
+        <motion.button
+          type="button"
+          onClick={onFavorite}
+          whileTap={{ scale: 0.88 }}
+          transition={SPRING.arrive}
+          aria-label="Favorite this track"
+          aria-pressed={isMine}
+          className="flex items-center gap-1.5 rounded-full py-2 pl-3.5 pr-2.5 text-sm"
+          style={{ color: isMine ? 'var(--color-room-heart)' : undefined }}
         >
-          ▾
-        </motion.span>
-      </button>
+          <Heart filled={isMine} />
+          <span className="tabular-nums">{count}</span>
+        </motion.button>
+
+        <span aria-hidden className="h-4 w-px bg-room-edge" />
+
+        {/* Always offered, even empty. A control that only appears once you
+            have earned it is a control nobody knows is there. */}
+        <motion.button
+          type="button"
+          onClick={() => setOpen((was) => !was)}
+          whileTap={{ scale: 0.88 }}
+          transition={SPRING.arrive}
+          aria-expanded={open}
+          aria-label={`Tracks you favorited (${likedTracks.length})`}
+          className="rounded-full py-2 pl-2.5 pr-3 text-sm leading-none text-room-dim"
+        >
+          <motion.span
+            aria-hidden
+            animate={{ rotate: open ? 180 : 0 }}
+            transition={{ duration: DURATION.quick, ease: EASE.standard }}
+            className="block"
+          >
+            ▾
+          </motion.span>
+        </motion.button>
+      </div>
 
       <AnimatePresence>
         {open && (
