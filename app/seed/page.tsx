@@ -19,7 +19,10 @@
  * tracks that are genuinely new need driving, rather than all of them every
  * time.
  *
- * ?set=<soundcloud set url> to harvest a set other than the current default.
+ * With no arguments it harvests whatever the room is currently playing,
+ * because that is nearly always the set you just added a track to.
+ *
+ * ?set=<soundcloud set url> to harvest a different set.
  * ?room=<slug>              to diff against a room other than the default.
  */
 
@@ -47,28 +50,39 @@ export default function SeedHarvester() {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const playerRef = useRef<SoundCloudPlayer | null>(null);
 
-  const [setUrl, setSetUrl] = useState<string>(FIXTURE_SET_URL);
-
-  useEffect(() => {
-    const override = new URLSearchParams(window.location.search).get('set');
-    if (override !== null && override.length > 0) setSetUrl(override);
-  }, []);
+  // Null until resolved: the room is asked what it is playing, so opening
+  // this page with no arguments harvests the set already in rotation.
+  const [setUrl, setSetUrl] = useState<string | null>(null);
   const [sounds, setSounds] = useState<WidgetSound[]>([]);
   const [chosen, setChosen] = useState<Set<number>>(new Set());
   const [verdicts, setVerdicts] = useState<Map<number, Verdict>>(new Map());
   const [verifying, setVerifying] = useState(false);
   const [status, setStatus] = useState('loading the set…');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
   const [live, setLive] = useState<LiveSchedule | null>(null);
 
-  // What the room is playing right now, to diff the set against.
+  // What the room is playing right now — both to diff the set against, and
+  // to decide which set to harvest when nobody said.
   useEffect(() => {
-    const roomSlug = new URLSearchParams(window.location.search).get('room') ?? DEFAULT_ROOM_SLUG;
+    const params = new URLSearchParams(window.location.search);
+    const roomSlug = params.get('room') ?? DEFAULT_ROOM_SLUG;
+    const override = params.get('set');
+    const hasOverride = override !== null && override.length > 0;
+
+    // An explicit set does not wait for the room to answer.
+    if (hasOverride) setSetUrl(override);
+
     let cancelled = false;
     void fetchActiveSchedule(roomSlug)
       .then((schedule) => {
-        if (!cancelled) setLive(schedule);
+        if (cancelled) return;
+        setLive(schedule);
+        if (!hasOverride) setSetUrl(schedule?.setUrl ?? FIXTURE_SET_URL);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled && !hasOverride) setSetUrl(FIXTURE_SET_URL);
+      });
     return () => {
       cancelled = true;
     };
@@ -76,7 +90,7 @@ export default function SeedHarvester() {
 
   useEffect(() => {
     const iframe = iframeRef.current;
-    if (iframe === null) return;
+    if (iframe === null || setUrl === null) return;
 
     let cancelled = false;
     let player: SoundCloudPlayer | null = null;
@@ -198,6 +212,41 @@ export default function SeedHarvester() {
   });
   const totalMs = verifiedPlayable.reduce((sum, s) => sum + s.durationMs, 0);
 
+  /**
+   * Hands the snapshot to the dev-only route that writes seed.json, so the
+   * JSON never has to be selected out of a textarea by hand. The textarea
+   * stays for when this cannot work — a different machine, a wrong cwd.
+   */
+  const save = useCallback(async (snapshot: string) => {
+    setSaving(true);
+    setSaved(null);
+    try {
+      const response = await fetch('/api/dev/save-snapshot', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: snapshot,
+      });
+      const result: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message =
+          typeof result === 'object' && result !== null && 'error' in result
+            ? String((result as Record<string, unknown>)['error'])
+            : `save failed (${response.status})`;
+        setSaved(`could not save — ${message}`);
+        return;
+      }
+      const count =
+        typeof result === 'object' && result !== null && 'tracks' in result
+          ? String((result as Record<string, unknown>)['tracks'])
+          : '?';
+      setSaved(`saved seed.json — ${count} tracks. Now run: npm run seed`);
+    } catch (cause) {
+      setSaved(`could not save — ${cause instanceof Error ? cause.message : String(cause)}`);
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
   const payload = allSelectedVerified
     ? JSON.stringify(
         {
@@ -220,7 +269,7 @@ export default function SeedHarvester() {
     <main>
       <h1>Seed harvester</h1>
       <p>
-        <code>{setUrl}</code> — {status}
+        <code>{setUrl ?? 'asking the room what it is playing…'}</code> — {status}
       </p>
 
       {/* The question this page exists to answer at a glance. */}
@@ -329,10 +378,24 @@ export default function SeedHarvester() {
       {allSelectedVerified ? (
         <>
           <p>
-            Save as <code>seed.json</code>, then run{' '}
-            <code>node --env-file=.env.local scripts/seed.mjs seed.json</code>.
+            <button type="button" onClick={() => void save(payload)} disabled={saving}>
+              {saving ? 'saving…' : 'Save seed.json'}
+            </button>{' '}
+            {saved !== null && <small>{saved}</small>}
           </p>
-          <textarea readOnly rows={20} cols={100} value={payload} />
+          <p>
+            <small>
+              Writes <code>seed.json</code> next to package.json. Then{' '}
+              <code>npm run seed</code> puts it in the database — that half needs the
+              service role key, so it stays a local script.
+            </small>
+          </p>
+          <details>
+            <summary>
+              <small>the JSON, if you would rather copy it yourself</small>
+            </summary>
+            <textarea readOnly rows={20} cols={100} value={payload} />
+          </details>
         </>
       ) : (
         <p>
@@ -344,14 +407,16 @@ export default function SeedHarvester() {
         </p>
       )}
 
-      <iframe
-        ref={iframeRef}
-        title="SoundCloud player"
-        src={widgetIframeSrc(setUrl)}
-        allow="autoplay"
-        width="100%"
-        height="120"
-      />
+      {setUrl !== null && (
+        <iframe
+          ref={iframeRef}
+          title="SoundCloud player"
+          src={widgetIframeSrc(setUrl)}
+          allow="autoplay"
+          width="100%"
+          height="120"
+        />
+      )}
     </main>
   );
 }
