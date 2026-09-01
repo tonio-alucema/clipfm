@@ -86,8 +86,18 @@ export default function RoomPage() {
           whatever is playing, and putting it on the title row made it read as
           part of the track rather than as something you do. */}
       <header className="mb-8 flex items-center justify-between gap-4">
-        <h1 className="text-sm font-medium tracking-widest text-room-dim uppercase">
-          {room.roomName}
+        {/* The mark, not the room name. They happen to be the same words
+            today, but the logo is the product and the name is data — if a
+            second room is ever added, this should not silently rename it. */}
+        <h1>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/clipfm-logo-white.svg"
+            alt="clip.fm"
+            width={171}
+            height={55}
+            className="block h-[44px] w-auto"
+          />
         </h1>
         {room.phase === 'ready' && (
           <FavoriteBar
