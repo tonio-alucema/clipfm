@@ -270,17 +270,17 @@ export default function RoomPage() {
                         setRequest(event.target.value);
                         setRequestResult(null);
                       }}
-                      placeholder="paste soundcloud (single track not playlist) here"
+                      placeholder="paste single track soundcloud link here"
                       aria-label="SoundCloud track link"
                       inputMode="url"
-                      className="min-w-0 flex-1 rounded-full border border-room-edge bg-room-floor px-4 py-3 text-sm text-room-ink placeholder:text-room-faint"
+                      className="min-w-0 flex-1 rounded-full border border-room-edge bg-room-floor px-3.5 py-3 text-sm text-room-ink placeholder:text-xs placeholder:text-room-faint sm:placeholder:text-sm"
                     />
                     <motion.button
                       layout
                       transition={SPRING.arrive}
                       type="submit"
                       disabled={sent || request.trim().length === 0}
-                      className="flex items-center justify-center rounded-full bg-room-ink px-5 py-3 text-sm font-medium text-room-void disabled:opacity-40"
+                      className="flex items-center justify-center rounded-full bg-room-ink px-4 py-3 text-sm font-medium text-room-void disabled:opacity-40"
                     >
                       <AnimatePresence mode="wait" initial={false}>
                         {sent ? (
