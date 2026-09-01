@@ -6,10 +6,14 @@
  * A dark place you tune into. Everything the room knows comes from `useRoom`;
  * this file is only responsible for how it looks.
  *
- * The SoundCloud widget is kept visible, small, at the bottom. Hiding an embed
- * is where attribution goes to die, and the audio genuinely does come from
- * there — pretending otherwise would be both dishonest and against the terms
- * the free widget is offered under.
+ * The SoundCloud widget is mounted but out of sight. Its own controls were
+ * misleading here — pausing it fights the schedule rather than the room, and
+ * the room is not a thing you pause. What the embed carried that still matters
+ * is the credit, so that moves to the mark beside the progress bar and links
+ * out to the track. Attribution is kept deliberately rather than incidentally.
+ *
+ * It is positioned off-screen rather than `display: none`: a hidden iframe can
+ * be suspended by the browser, and this one is the audio.
  */
 
 import { AnimatePresence, motion } from 'framer-motion';
@@ -19,6 +23,7 @@ import { Avatar } from '@/components/avatar';
 import { HeartBurst } from '@/components/heart-burst';
 import { MarqueeText } from '@/components/marquee-text';
 import { FavoriteBar } from '@/components/favorite-bar';
+import { SoundCloudMark } from '@/components/soundcloud-mark';
 import { widgetIframeSrc } from '@/lib/player/widget-api';
 import { CONFIRM_HOLD, DURATION, EASE, SPRING, jitter } from '@/lib/motion';
 import { useRoom } from '@/lib/room/use-room';
@@ -44,8 +49,9 @@ export default function RoomPage() {
     if (collapseRef.current !== null) clearTimeout(collapseRef.current);
   }, []);
 
-  // The buttons sit near the bottom, so the input it reveals opens off-screen
-  // on a phone — a field you cannot see is a field nobody fills in.
+  // The field opens above the buttons, so it is in view already — but a phone
+  // keyboard covers the lower third once it is focused, which puts it back
+  // off-screen. Scrolling it up is for the keyboard, not the layout.
   useEffect(() => {
     if (!requesting) return;
     requestRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -111,7 +117,7 @@ export default function RoomPage() {
 
             {/* Everyone is at the same point in this bar, which is the whole
                 idea. It is drawn from the schedule, not from the player. */}
-            <div className="mt-4 flex items-center gap-3 text-xs tabular-nums text-room-faint">
+            <div className="mt-4 flex items-center gap-2.5 text-xs tabular-nums text-room-faint">
               <span>{clock(room.offsetMs)}</span>
               <div className="h-0.5 flex-1 overflow-hidden rounded-full bg-room-edge">
                 <div
@@ -120,6 +126,7 @@ export default function RoomPage() {
                 />
               </div>
               <span>{clock(room.track?.durationMs ?? 0)}</span>
+              <SoundCloudMark href={room.track?.url ?? null} />
             </div>
 
             {/* A quarter of the width, centred. The room is about the people;
@@ -182,51 +189,13 @@ export default function RoomPage() {
             </ul>
           </section>
 
+          {/* Bottom-anchored, and the order is deliberate: the buttons are
+              the one thing that never moves. Status sits above them, and the
+              request field opens between the two — so revealing it nudges the
+              status up rather than pushing the buttons off under a thumb. */}
           <div className="pt-8">
-            {/* Tune in needs a real gesture, and mobile only unlocks audio from
-                inside one — so the button stays disabled until there is a
-                player to receive it. */}
-            <div className="flex items-center justify-center gap-3">
-              {room.tunedIn && !room.contended ? (
-                <motion.button
-                  type="button"
-                  onClick={room.tuneOut}
-                  whileTap={{ scale: 0.97 }}
-                  transition={SPRING.arrive}
-                  className="rounded-full border-2 border-room-ink px-12 py-5 text-sm font-medium text-room-ink"
-                >
-                  Tune out
-                </motion.button>
-              ) : (
-                <motion.button
-                  type="button"
-                  onClick={room.tuneIn}
-                  disabled={!room.ready}
-                  whileTap={{ scale: room.ready ? 0.97 : 1 }}
-                  transition={SPRING.arrive}
-                  className="rounded-full bg-room-ink px-12 py-5 text-sm font-medium text-room-void disabled:opacity-40"
-                >
-                  {!room.ready ? 'Getting ready…' : room.contended ? 'Try again' : 'Tune in'}
-                </motion.button>
-              )}
-
-              <motion.button
-                type="button"
-                onClick={() => {
-                  setRequestResult(null);
-                  setRequesting((was) => !was);
-                }}
-                whileTap={{ scale: 0.97 }}
-                transition={SPRING.arrive}
-                aria-expanded={requesting}
-                className="rounded-full border border-room-edge px-6 py-5 text-sm font-medium text-room-dim"
-              >
-                Request track
-              </motion.button>
-            </div>
-
             {room.tunedIn && !room.contended && (
-              <p className="mt-2 text-center text-xs text-room-faint">
+              <p className="mb-3 text-center text-xs text-room-faint">
                 {room.unavailable
                   ? 'this track will not play here'
                   : room.playerState === 'stalled'
@@ -235,7 +204,7 @@ export default function RoomPage() {
               </p>
             )}
             {room.contended && (
-              <p className="mt-2 text-center text-xs text-room-faint">
+              <p className="mb-3 text-center text-xs text-room-faint">
                 Playback would not start. If the room is open in another tab, close it.
               </p>
             )}
@@ -244,15 +213,17 @@ export default function RoomPage() {
               {requesting && (
                 <motion.form
                   ref={requestRef}
-                  initial={{ opacity: 0, height: 0 }}
+                  initial={{ opacity: 0, height: 0, y: 12 }}
                   animate={{
                     opacity: 1,
                     height: 'auto',
+                    y: 0,
                     transition: { duration: DURATION.normal, ease: EASE.enter },
                   }}
                   exit={{
                     opacity: 0,
                     height: 0,
+                    y: 12,
                     transition: { duration: DURATION.quick, ease: EASE.exit },
                   }}
                   className="overflow-hidden"
@@ -274,7 +245,7 @@ export default function RoomPage() {
                     });
                   }}
                 >
-                  <div className="mt-4 flex gap-2">
+                  <div className="mb-4 flex gap-2">
                     <input
                       value={request}
                       onChange={(event) => {
@@ -335,7 +306,7 @@ export default function RoomPage() {
                       </AnimatePresence>
                     </motion.button>
                   </div>
-                  <p className="mt-2 text-center text-xs text-room-faint">
+                  <p className="mb-4 text-center text-xs text-room-faint">
                     {requestResult === 'saved' && 'Sent — it is up to the curator now.'}
                     {requestResult === 'already' && 'You have already asked for that one.'}
                     {requestResult === 'invalid' &&
@@ -346,14 +317,63 @@ export default function RoomPage() {
                 </motion.form>
               )}
             </AnimatePresence>
+
+            {/* Tune in needs a real gesture, and mobile only unlocks audio from
+                inside one — so the button stays disabled until there is a
+                player to receive it. */}
+            <div className="flex items-center justify-center gap-3">
+              {room.tunedIn && !room.contended ? (
+                <motion.button
+                  type="button"
+                  onClick={room.tuneOut}
+                  whileTap={{ scale: 0.97 }}
+                  transition={SPRING.arrive}
+                  className="rounded-full border-2 border-room-ink px-12 py-5 text-sm font-medium text-room-ink"
+                >
+                  Tune out
+                </motion.button>
+              ) : (
+                <motion.button
+                  type="button"
+                  onClick={room.tuneIn}
+                  disabled={!room.ready}
+                  whileTap={{ scale: room.ready ? 0.97 : 1 }}
+                  transition={SPRING.arrive}
+                  className="rounded-full bg-room-ink px-12 py-5 text-sm font-medium text-room-void disabled:opacity-40"
+                >
+                  {!room.ready ? 'Getting ready…' : room.contended ? 'Try again' : 'Tune in'}
+                </motion.button>
+              )}
+
+              <motion.button
+                type="button"
+                onClick={() => {
+                  setRequestResult(null);
+                  setRequesting((was) => !was);
+                }}
+                whileTap={{ scale: 0.97 }}
+                transition={SPRING.arrive}
+                aria-expanded={requesting}
+                className="rounded-full border border-room-edge px-6 py-5 text-sm font-medium text-room-dim"
+              >
+                Request track
+              </motion.button>
+            </div>
           </div>
+
         </>
       )}
 
-      {/* Kept visible and small: this is where the audio actually comes from,
-          and where SoundCloud's attribution lives. */}
+      {/* Out of sight, still playing. Off-screen rather than hidden: a
+          `display: none` iframe is a candidate for suspension, and this one is
+          the only thing making sound. Credit lives on the mark up by the
+          progress bar. */}
       {room.setUrl !== null && (
-        <div className="mt-6 overflow-hidden rounded-lg opacity-40">
+        <div
+          aria-hidden
+          className="pointer-events-none fixed top-0 h-px w-px overflow-hidden opacity-0"
+          style={{ left: '-9999px' }}
+        >
           <iframe
             ref={room.iframeRef}
             title="SoundCloud player"
