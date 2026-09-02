@@ -83,13 +83,19 @@ export function HeartBurst({ id, listenerId, fallbackOrigin }: HeartBurstProps) 
         // curve reads as hanging still and then darting off. Rising quickly
         // and settling into a drift is what a released thing actually does.
         //
-        // The opacity stops are pulled earlier so the burst still appears at
-        // once: it fades in over ~0.14s and spends the rest of its life
-        // fading out.
+        // Opacity gets its own linear timing. A single ease is applied across
+        // the keyframe sequence, so the decelerating curve above was dragging
+        // the fade stops forward with it — measured, the heart was down to
+        // 0.15 opacity by 1.4s of a 2.4s flight and effectively invisible for
+        // half its life. Position eases; the fade keeps clock time.
         transition: {
           duration: HEART_BURST_SECONDS,
           ease: EASE.enter,
-          times: [0, 0.06, 0.55, 1],
+          opacity: {
+            duration: HEART_BURST_SECONDS,
+            ease: 'linear',
+            times: [0, 0.06, 0.55, 1],
+          },
         },
       }}
       style={{
