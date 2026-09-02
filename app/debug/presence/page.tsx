@@ -161,7 +161,12 @@ export default function RoomHarness() {
       <div style={{ position: 'relative', minHeight: '9rem', paddingTop: '5.5rem' }}>
         <AnimatePresence initial={false}>
           {hearts.map((heart) => (
-            <HeartBurst key={heart.id} id={heart.id} origin={jitter(heart.listenerId, 0.8) + 0.1} />
+            <HeartBurst
+              key={heart.id}
+              id={heart.id}
+              listenerId={heart.listenerId}
+              fallbackOrigin={jitter(heart.listenerId, 0.8) + 0.1}
+            />
           ))}
         </AnimatePresence>
 

@@ -80,6 +80,9 @@ export function Avatar({ id, nickname, isSelf = false, onRename }: AvatarProps) 
 
   return (
     <motion.li
+      // How a heart burst finds the person who threw it. Presence ids are the
+      // only thing the burst and the avatar have in common.
+      data-listener={id}
       layout
       transition={SPRING.layout}
       initial={{ opacity: 0, scale: 0.6, y: 14 }}

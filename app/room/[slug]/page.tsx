@@ -206,7 +206,8 @@ export default function RoomPage() {
                 <HeartBurst
                   key={heart.id}
                   id={heart.id}
-                  origin={jitter(heart.listenerId, 0.78) + 0.11}
+                  listenerId={heart.listenerId}
+                  fallbackOrigin={jitter(heart.listenerId, 0.78) + 0.11}
                 />
               ))}
             </AnimatePresence>
